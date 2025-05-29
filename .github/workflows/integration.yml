@@ -1,0 +1,227 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run integration tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio
+
+    - name: Create databases directory
+      run: |
+        mkdir -p databases/official
+
+    - name: Download PHREEQC databases
+      run: |
+        cd databases/official
+        # Download test databases for integration testing
+        curl -L -o minteq.dat "https://www.usgs.gov/media/files/minteq-v4-thermodynamic-database" || echo "Failed to download minteq.dat"
+        curl -L -o phreeqc.dat "https://www.usgs.gov/media/files/phreeqc-thermodynamic-database" || echo "Failed to download phreeqc.dat"
+        # Create fallback minimal databases if downloads fail
+        if [ ! -f minteq.dat ]; then
+          echo "# Minimal test database" > minteq.dat
+          echo "SOLUTION_MASTER_SPECIES" >> minteq.dat
+          echo "Ca     Ca+2     0.0     40.078     40.078" >> minteq.dat
+          echo "END" >> minteq.dat
+        fi
+
+    - name: Run chemical addition integration tests
+      run: |
+        python -c "
+        import asyncio
+        import sys
+        sys.path.append('.')
+        
+        async def test_chemical_addition():
+            from tools.chemical_addition import simulate_chemical_addition
+            from tools.schemas import ChemicalAdditionInput, InitialSolution, ChemicalReactant
+            
+            try:
+                input_data = ChemicalAdditionInput(
+                    database='minteq.dat',
+                    reactants=[ChemicalReactant(amount=1, formula='NaOH')],
+                    initial_solution=InitialSolution(pH=7, analysis={'Ca': 5, 'Cl': 10})
+                )
+                result = await simulate_chemical_addition(input_data)
+                assert 'solution_summary' in result
+                print('✓ Chemical addition test passed')
+            except Exception as e:
+                print(f'✗ Chemical addition test failed: {e}')
+                return False
+            return True
+        
+        success = asyncio.run(test_chemical_addition())
+        sys.exit(0 if success else 1)
+        "
+
+    - name: Run scaling potential integration tests
+      run: |
+        python -c "
+        import asyncio
+        import sys
+        sys.path.append('.')
+        
+        async def test_scaling_potential():
+            from tools.scaling_potential import predict_scaling_potential
+            from tools.schemas import ScalingPotentialInput, WaterAnalysis
+            
+            try:
+                input_data = ScalingPotentialInput(
+                    water_analysis=WaterAnalysis(
+                        pH=7.5,
+                        temperature_celsius=25,
+                        Ca=5, Mg=2, HCO3=3, SO4=1, Cl=10, Na=8
+                    )
+                )
+                result = await predict_scaling_potential(input_data)
+                assert 'scaling_indices' in result
+                print('✓ Scaling potential test passed')
+            except Exception as e:
+                print(f'✗ Scaling potential test failed: {e}')
+                return False
+            return True
+        
+        success = asyncio.run(test_scaling_potential())
+        sys.exit(0 if success else 1)
+        "
+
+    - name: Run dosing requirement integration tests
+      run: |
+        python -c "
+        import asyncio
+        import sys
+        sys.path.append('.')
+        
+        async def test_dosing_requirement():
+            from tools.dosing_requirement import calculate_dosing_requirement
+            from tools.schemas import DosingRequirementInput, WaterAnalysis
+            
+            try:
+                input_data = DosingRequirementInput(
+                    water_analysis=WaterAnalysis(
+                        pH=7.5,
+                        temperature_celsius=25,
+                        Ca=5, Mg=2, HCO3=3, SO4=1, Cl=10, Na=8
+                    ),
+                    target_ph=8.5,
+                    chemical_formula='NaOH'
+                )
+                result = await calculate_dosing_requirement(input_data)
+                assert 'dose_mg_L' in result
+                print('✓ Dosing requirement test passed')
+            except Exception as e:
+                print(f'✗ Dosing requirement test failed: {e}')
+                return False
+            return True
+        
+        success = asyncio.run(test_dosing_requirement())
+        sys.exit(0 if success else 1)
+        "
+
+    - name: Run solution speciation integration tests
+      run: |
+        python -c "
+        import asyncio
+        import sys
+        sys.path.append('.')
+        
+        async def test_solution_speciation():
+            from tools.solution_speciation import analyze_solution_speciation
+            from tools.schemas import SolutionSpeciationInput, WaterAnalysis
+            
+            try:
+                input_data = SolutionSpeciationInput(
+                    water_analysis=WaterAnalysis(
+                        pH=7.5,
+                        temperature_celsius=25,
+                        Ca=5, Mg=2, HCO3=3, SO4=1, Cl=10, Na=8
+                    )
+                )
+                result = await analyze_solution_speciation(input_data)
+                assert 'species_molality' in result
+                print('✓ Solution speciation test passed')
+            except Exception as e:
+                print(f'✗ Solution speciation test failed: {e}')
+                return False
+            return True
+        
+        success = asyncio.run(test_solution_speciation())
+        sys.exit(0 if success else 1)
+        "
+
+    - name: Run kinetic modeling integration tests
+      run: |
+        python -c "
+        import asyncio
+        import sys
+        sys.path.append('.')
+        
+        async def test_kinetic_modeling():
+            from tools.chemical_addition import simulate_chemical_addition
+            from tools.schemas import (
+                ChemicalAdditionInput, InitialSolution, ChemicalReactant,
+                KineticParameters, MineralKineticParams
+            )
+            
+            try:
+                input_data = ChemicalAdditionInput(
+                    database='minteq.dat',
+                    reactants=[ChemicalReactant(amount=2, formula='Ca(OH)2')],
+                    initial_solution=InitialSolution(
+                        pH=7, 
+                        analysis={'Ca': 5, 'C(4)': 3}
+                    ),
+                    kinetic_parameters=KineticParameters(
+                        time_steps=[0, 60, 300],
+                        enable_kinetics=True,
+                        minerals_kinetic={
+                            'Calcite': MineralKineticParams(
+                                m0=0, m=1e-6, tol=1e-6, parms=[1, 0.6]
+                            )
+                        },
+                        use_phreeqc_rates=True
+                    )
+                )
+                result = await simulate_chemical_addition(input_data)
+                assert 'kinetic_profiles' in result
+                profile = result['kinetic_profiles'][0]
+                assert len(profile['time_seconds']) >= 2
+                print('✓ Kinetic modeling test passed')
+            except Exception as e:
+                print(f'✗ Kinetic modeling test failed: {e}')
+                return False
+            return True
+        
+        success = asyncio.run(test_kinetic_modeling())
+        sys.exit(0 if success else 1)
+        "
+
+    - name: Upload integration test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-test-results
+        path: |
+          *.log
+          databases/

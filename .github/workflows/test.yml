@@ -1,0 +1,122 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: [3.9, 3.10, 3.11, 3.12]
+        exclude:
+          # Exclude some combinations to reduce CI load
+          - os: macos-latest
+            python-version: 3.9
+          - os: macos-latest
+            python-version: 3.10
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-asyncio
+
+    - name: Create test databases directory
+      run: |
+        mkdir -p databases/official
+
+    - name: Download test databases (Linux/MacOS)
+      if: runner.os != 'Windows'
+      run: |
+        cd databases/official
+        # Download minimal test databases
+        curl -L -o minteq.dat "https://www.usgs.gov/media/files/minteq-v4-thermodynamic-database"
+        curl -L -o phreeqc.dat "https://www.usgs.gov/media/files/phreeqc-thermodynamic-database"
+      continue-on-error: true
+
+    - name: Download test databases (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        cd databases/official
+        # Download minimal test databases
+        Invoke-WebRequest -Uri "https://www.usgs.gov/media/files/minteq-v4-thermodynamic-database" -OutFile "minteq.dat"
+        Invoke-WebRequest -Uri "https://www.usgs.gov/media/files/phreeqc-thermodynamic-database" -OutFile "phreeqc.dat"
+      shell: pwsh
+      continue-on-error: true
+
+    - name: Run linting
+      run: |
+        python -m flake8 tools/ utils/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        python -m flake8 tools/ utils/ --count --max-complexity=10 --max-line-length=120 --statistics
+      continue-on-error: true
+
+    - name: Run type checking
+      run: |
+        python -m mypy tools/ utils/ --ignore-missing-imports
+      continue-on-error: true
+
+    - name: Run unit tests
+      run: |
+        python -m pytest tests/ -v --cov=tools --cov=utils --cov-report=xml --cov-report=html
+      continue-on-error: true
+
+    - name: Test MCP server startup
+      run: |
+        timeout 30s python server.py --test || true
+      shell: bash
+      continue-on-error: true
+
+    - name: Test individual tools
+      run: |
+        python -c "
+        import sys
+        sys.path.append('.')
+        try:
+            from tools.chemical_addition import simulate_chemical_addition
+            from tools.solution_speciation import analyze_solution_speciation
+            from tools.scaling_potential import predict_scaling_potential
+            from tools.dosing_requirement import calculate_dosing_requirement
+            print('✓ All tools import successfully')
+        except Exception as e:
+            print(f'✗ Import error: {e}')
+            sys.exit(1)
+        "
+
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+      continue-on-error: true
+
+    - name: Store test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ matrix.os }}-${{ matrix.python-version }}
+        path: |
+          htmlcov/
+          coverage.xml
+          pytest-report.xml

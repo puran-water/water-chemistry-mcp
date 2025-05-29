@@ -1,0 +1,60 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install flake8 mypy black isort bandit safety
+
+    - name: Run Black (code formatting)
+      run: |
+        black --check --diff tools/ utils/ server.py
+
+    - name: Run isort (import sorting)
+      run: |
+        isort --check-only --diff tools/ utils/ server.py
+
+    - name: Run flake8 (linting)
+      run: |
+        flake8 tools/ utils/ server.py --max-line-length=120 --extend-ignore=E203,W503
+
+    - name: Run mypy (type checking)
+      run: |
+        mypy tools/ utils/ server.py --ignore-missing-imports
+
+    - name: Run bandit (security analysis)
+      run: |
+        bandit -r tools/ utils/ server.py -f json -o bandit-report.json
+      continue-on-error: true
+
+    - name: Run safety (dependency security check)
+      run: |
+        safety check --json --output safety-report.json
+      continue-on-error: true
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json

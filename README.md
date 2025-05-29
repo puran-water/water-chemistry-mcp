@@ -8,17 +8,17 @@
 
 Advanced water chemistry modeling MCP server powered by PHREEQC, designed for industrial wastewater treatment applications. This server provides sophisticated chemical equilibrium and kinetic modeling capabilities through a modern Model Context Protocol (MCP) interface.
 
-## 🌟 Features
+## Features
 
 ### Core Water Chemistry Tools
 
-1. **🧪 Solution Speciation** - Complete water quality analysis including pH, ionic strength, saturation indices, and species distribution
-2. **⚗️ Chemical Addition** - Simulate treatment processes with chemical dosing and equilibrium calculations
-3. **📊 Dosing Requirement** - Calculate optimal chemical doses using advanced convergence algorithms
-4. **🌊 Solution Mixing** - Analyze blending of multiple water streams with precipitation modeling
-5. **⚖️ Scaling Potential** - Predict mineral scaling risks for membrane systems (RO/NF)
-6. **⏱️ Kinetic Modeling** - Time-dependent precipitation and dissolution kinetics
-7. **📋 Engineering Calculation Sheets** - Professional documentation generation
+1. **Solution Speciation** - Complete water quality analysis including pH, ionic strength, saturation indices, and species distribution
+2. **Chemical Addition** - Simulate treatment processes with chemical dosing and equilibrium calculations
+3. **Dosing Requirement** - Calculate optimal chemical doses using advanced convergence algorithms
+4. **Solution Mixing** - Analyze blending of multiple water streams with precipitation modeling
+5. **Scaling Potential** - Predict mineral scaling risks for membrane systems (RO/NF)
+6. **Kinetic Modeling** - Time-dependent precipitation and dissolution kinetics
+7. **Engineering Calculation Sheets** - Professional documentation generation
 
 ### Advanced Capabilities
 
@@ -28,7 +28,7 @@ Advanced water chemistry modeling MCP server powered by PHREEQC, designed for in
 - **Industrial Focus**: Optimized for wastewater treatment design
 - **Professional Documentation**: Client-ready calculation sheets and reports
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
@@ -72,7 +72,7 @@ input_data = ChemicalAdditionInput(
 result = await simulate_chemical_addition(input_data)
 ```
 
-## 🔬 Kinetic Modeling
+## Kinetic Modeling
 
 Advanced kinetic precipitation modeling with time-dependent behavior:
 
@@ -99,7 +99,7 @@ kinetic_params = KineticParameters(
 - Enhanced numerical stability
 - Prevention of mineral exhaustion issues
 
-## 📊 Engineering Calculation Sheets
+## Engineering Calculation Sheets
 
 Generate professional documentation for engineering projects:
 
@@ -122,7 +122,7 @@ sheet_data = {
 notebook_path, html_path = await generate_calculation_sheet(sheet_data)
 ```
 
-## 🗃️ Database Support
+## Database Support
 
 Comprehensive PHREEQC database support with intelligent path resolution:
 
@@ -147,7 +147,7 @@ compatible = database_manager.get_compatible_minerals(
 )
 ```
 
-## 🧪 Testing
+## Testing
 
 ### Run All Tests
 
@@ -174,7 +174,7 @@ The project includes comprehensive CI/CD workflows:
 - **Integration Tests**: Real-world scenarios with PHREEQC
 - **Release Automation**: Automated versioning and releases
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 water-chemistry-mcp/
@@ -196,7 +196,7 @@ water-chemistry-mcp/
 └── .github/workflows/       # CI/CD workflows
 ```
 
-## 🔧 Configuration
+## Configuration
 
 ### Environment Variables
 
@@ -225,7 +225,7 @@ For Claude Desktop:
 }
 ```
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
@@ -245,13 +245,13 @@ flake8 tools/ utils/ server.py
 pytest
 ```
 
-## 📖 Documentation
+## Documentation
 
 - **[AI Agent System Prompt](AI_AGENT_SYSTEM_PROMPT.md)** - Comprehensive usage guide
 - **[Contributing Guidelines](CONTRIBUTING.md)** - Development guidelines
 - **[Test Documentation](tests/README.md)** - Testing setup and troubleshooting
 
-## 🏗️ Architecture
+## Architecture
 
 The server is built using:
 
@@ -261,23 +261,14 @@ The server is built using:
 - **Pydantic**: Data validation and serialization
 - **AsyncIO**: Asynchronous processing for performance
 
-## 📋 Requirements
+## Requirements
 
 - Python 3.9+
 - PhreeqPython 1.5.2+
 - PHREEQC databases
 - See [requirements.txt](requirements.txt) for full dependencies
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🏢 About Puran Water
-
-Puran Water specializes in advanced water treatment technologies and engineering solutions. This MCP server represents our commitment to open-source tools for the water treatment industry.
-
-**Contact**: info@puranwater.com
-
----
-
-*Built with ❤️ for the water treatment engineering community*

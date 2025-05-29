@@ -55,13 +55,13 @@ jobs:
         
         async def test_chemical_addition():
             from tools.chemical_addition import simulate_chemical_addition
-            from tools.schemas import ChemicalAdditionInput, InitialSolution, ChemicalReactant
+            from tools.schemas import SimulateChemicalAdditionInput, WaterAnalysisInput, ReactantInput
             
             try:
-                input_data = ChemicalAdditionInput(
+                input_data = SimulateChemicalAdditionInput(
                     database='minteq.dat',
-                    reactants=[ChemicalReactant(amount=1, formula='NaOH')],
-                    initial_solution=InitialSolution(pH=7, analysis={'Ca': 5, 'Cl': 10})
+                    reactants=[ReactantInput(amount=1, formula='NaOH')],
+                    initial_solution=WaterAnalysisInput(ph=7, analysis={'Ca': 5, 'Cl': 10})
                 )
                 result = await simulate_chemical_addition(input_data)
                 assert 'solution_summary' in result
@@ -84,15 +84,13 @@ jobs:
         
         async def test_scaling_potential():
             from tools.scaling_potential import predict_scaling_potential
-            from tools.schemas import ScalingPotentialInput, WaterAnalysis
+            from tools.schemas import PredictScalingPotentialInput
             
             try:
-                input_data = ScalingPotentialInput(
-                    water_analysis=WaterAnalysis(
-                        pH=7.5,
-                        temperature_celsius=25,
-                        Ca=5, Mg=2, HCO3=3, SO4=1, Cl=10, Na=8
-                    )
+                input_data = PredictScalingPotentialInput(
+                    ph=7.5,
+                    temperature_celsius=25,
+                    analysis={'Ca': 5, 'Mg': 2, 'HCO3': 3, 'SO4': 1, 'Cl': 10, 'Na': 8}
                 )
                 result = await predict_scaling_potential(input_data)
                 assert 'scaling_indices' in result
@@ -115,17 +113,17 @@ jobs:
         
         async def test_dosing_requirement():
             from tools.dosing_requirement import calculate_dosing_requirement
-            from tools.schemas import DosingRequirementInput, WaterAnalysis
+            from tools.schemas import CalculateDosingRequirementInput, WaterAnalysisInput, TargetConditionInput, ReagentInput
             
             try:
-                input_data = DosingRequirementInput(
-                    water_analysis=WaterAnalysis(
-                        pH=7.5,
+                input_data = CalculateDosingRequirementInput(
+                    initial_solution=WaterAnalysisInput(
+                        ph=7.5,
                         temperature_celsius=25,
-                        Ca=5, Mg=2, HCO3=3, SO4=1, Cl=10, Na=8
+                        analysis={'Ca': 5, 'Mg': 2, 'HCO3': 3, 'SO4': 1, 'Cl': 10, 'Na': 8}
                     ),
-                    target_ph=8.5,
-                    chemical_formula='NaOH'
+                    target_condition=TargetConditionInput(parameter='pH', value=8.5),
+                    reagent=ReagentInput(formula='NaOH')
                 )
                 result = await calculate_dosing_requirement(input_data)
                 assert 'dose_mg_L' in result
@@ -148,15 +146,13 @@ jobs:
         
         async def test_solution_speciation():
             from tools.solution_speciation import analyze_solution_speciation
-            from tools.schemas import SolutionSpeciationInput, WaterAnalysis
+            from tools.schemas import CalculateSolutionSpeciationInput
             
             try:
-                input_data = SolutionSpeciationInput(
-                    water_analysis=WaterAnalysis(
-                        pH=7.5,
-                        temperature_celsius=25,
-                        Ca=5, Mg=2, HCO3=3, SO4=1, Cl=10, Na=8
-                    )
+                input_data = CalculateSolutionSpeciationInput(
+                    ph=7.5,
+                    temperature_celsius=25,
+                    analysis={'Ca': 5, 'Mg': 2, 'HCO3': 3, 'SO4': 1, 'Cl': 10, 'Na': 8}
                 )
                 result = await analyze_solution_speciation(input_data)
                 assert 'species_molality' in result
@@ -180,23 +176,23 @@ jobs:
         async def test_kinetic_modeling():
             from tools.chemical_addition import simulate_chemical_addition
             from tools.schemas import (
-                ChemicalAdditionInput, InitialSolution, ChemicalReactant,
-                KineticParameters, MineralKineticParams
+                SimulateChemicalAdditionInput, WaterAnalysisInput, ReactantInput,
+                KineticParameters, PHREEQCKineticParameters
             )
             
             try:
-                input_data = ChemicalAdditionInput(
+                input_data = SimulateChemicalAdditionInput(
                     database='minteq.dat',
-                    reactants=[ChemicalReactant(amount=2, formula='Ca(OH)2')],
-                    initial_solution=InitialSolution(
-                        pH=7, 
+                    reactants=[ReactantInput(amount=2, formula='Ca(OH)2')],
+                    initial_solution=WaterAnalysisInput(
+                        ph=7, 
                         analysis={'Ca': 5, 'C(4)': 3}
                     ),
                     kinetic_parameters=KineticParameters(
                         time_steps=[0, 60, 300],
                         enable_kinetics=True,
                         minerals_kinetic={
-                            'Calcite': MineralKineticParams(
+                            'Calcite': PHREEQCKineticParameters(
                                 m0=0, m=1e-6, tol=1e-6, parms=[1, 0.6]
                             )
                         },

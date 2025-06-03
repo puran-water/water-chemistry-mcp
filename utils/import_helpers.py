@@ -8,20 +8,37 @@ import sys
 import glob
 from typing import List, Optional
 
-# Path to the USGS PHREEQC database files - with multiple potential paths
-USGS_PHREEQC_DATABASE_PATHS = [
-    r"C:\Program Files\USGS\phreeqc-3.8.6-17100-x64\database",  # Windows path
-    r"C:\Program Files\USGS\phreeqc-3.8.6-17100-x6\database",   # Windows path (x6 variant)
-    r"/mnt/c/Program Files/USGS/phreeqc-3.8.6-17100-x64/database",  # WSL path to Windows
-    r"/mnt/c/Program Files/USGS/phreeqc-3.8.6-17100-x6/database"    # WSL path to Windows (x6 variant)
+# Path to the USGS PHREEQC database files - check environment variables first, then fallback paths
+USGS_PHREEQC_DATABASE_PATH = None
+
+# First, check environment variables
+env_paths = [
+    os.environ.get("USGS_PHREEQC_DATABASE_PATH"),
+    os.environ.get("PHREEQC_DATABASE_DIR"),
+    os.environ.get("PHREEQC_DATABASE_PATH")
 ]
 
-# Find the first valid USGS PHREEQC database path
-USGS_PHREEQC_DATABASE_PATH = None
-for path in USGS_PHREEQC_DATABASE_PATHS:
-    if os.path.exists(path):
-        USGS_PHREEQC_DATABASE_PATH = path
+for env_path in env_paths:
+    if env_path and os.path.exists(env_path) and os.path.isdir(env_path):
+        USGS_PHREEQC_DATABASE_PATH = env_path
         break
+
+# If no environment variable path works, try hardcoded fallback paths
+if USGS_PHREEQC_DATABASE_PATH is None:
+    USGS_PHREEQC_DATABASE_PATHS = [
+        r"C:\Program Files\USGS\phreeqc-3.8.6-17100-x64\database",  # Windows path
+        r"C:\Program Files\USGS\phreeqc-3.8.6-17100-x6\database",   # Windows path (x6 variant)
+        r"/mnt/c/Program Files/USGS/phreeqc-3.8.6-17100-x64/database",  # WSL path to Windows
+        r"/mnt/c/Program Files/USGS/phreeqc-3.8.6-17100-x6/database",    # WSL path to Windows (x6 variant)
+        r"/opt/phreeqc/database",  # Docker/Linux path
+        r"/usr/local/share/phreeqc/database"  # Alternative Linux path
+    ]
+
+    # Find the first valid USGS PHREEQC database path
+    for path in USGS_PHREEQC_DATABASE_PATHS:
+        if os.path.exists(path):
+            USGS_PHREEQC_DATABASE_PATH = path
+            break
 
 logger = logging.getLogger(__name__)
 

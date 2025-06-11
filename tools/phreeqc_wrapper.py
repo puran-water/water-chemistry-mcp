@@ -8,6 +8,7 @@ import os
 import asyncio
 import itertools
 import numpy as np
+import math
 from typing import Optional, Dict, Any, List, Tuple, Union
 from functools import lru_cache
 
@@ -1638,6 +1639,243 @@ async def calculate_kinetic_precipitation_phreeqc_native(
         return {"error": f"PHREEQC kinetic simulation failed: {e}"}
 
 
+def evaluate_target_parameter(results: Dict[str, Any], target_config: Dict[str, Any]) -> Optional[float]:
+    """
+    Evaluate complex target parameters from PHREEQC results.
+    
+    Args:
+        results: PHREEQC simulation results
+        target_config: Configuration for target evaluation including:
+            - parameter: The target parameter type
+            - value: The target value
+            - units: Optional units for conversion
+            - components: For composite parameters (e.g., metals list)
+            - conditions: Additional conditions/constraints
+    
+    Returns:
+        Current value of the target parameter, or None if not found
+    """
+    target_parameter = target_config.get('parameter')
+    target_units = target_config.get('units', '')
+    
+    # Get solution summary
+    if 'solution_summary' not in results:
+        return None
+    summary = results['solution_summary']
+    
+    # Simple parameters (existing functionality)
+    if target_parameter == 'pH':
+        return summary.get('pH')
+    
+    elif target_parameter == 'pe':
+        return summary.get('pe')
+    
+    elif target_parameter == 'ionic_strength':
+        return summary.get('ionic_strength')
+    
+    elif target_parameter == 'TDS':
+        return summary.get('tds_calculated')
+    
+    # Complex/Composite parameters (NEW)
+    elif target_parameter == 'total_hardness':
+        # Total hardness = Ca + Mg (as CaCO3)
+        element_totals = results.get('element_totals_molality', {})
+        ca_molal = element_totals.get('Ca', 0)
+        mg_molal = element_totals.get('Mg', 0)
+        
+        # Convert to desired units
+        if 'mg/L' in target_units and 'CaCO3' in target_units:
+            # Convert molality to mg/L as CaCO3
+            # 1 mol/kg Ca = 100,000 mg/L as CaCO3
+            # 1 mol/kg Mg = 100,000 mg/L as CaCO3
+            hardness_mg_caco3 = (ca_molal + mg_molal) * 100000
+            return hardness_mg_caco3
+        elif 'mmol/L' in target_units:
+            # Return as mmol/L
+            return (ca_molal + mg_molal) * 1000
+        else:
+            # Default to molality
+            return ca_molal + mg_molal
+    
+    elif target_parameter == 'residual_phosphorus':
+        # Residual P after treatment
+        element_totals = results.get('element_totals_molality', {})
+        p_molal = element_totals.get('P', 0)
+        
+        if 'mg/L' in target_units:
+            # Convert molality to mg/L P
+            # 1 mol/kg P = 30,974 mg/L P
+            return p_molal * 30974
+        else:
+            return p_molal
+    
+    elif target_parameter == 'total_metals':
+        # Sum of specified metals
+        components = target_config.get('components', ['Fe', 'Cu', 'Zn', 'Pb', 'Ni', 'Cd'])
+        element_totals = results.get('element_totals_molality', {})
+        
+        total = sum(element_totals.get(metal, 0) for metal in components)
+        
+        if 'mg/L' in target_units:
+            # Need individual MW for accurate conversion
+            # Simplified: assume average MW of 60 g/mol
+            return total * 60000
+        else:
+            return total
+    
+    elif target_parameter == 'carbonate_alkalinity':
+        # Carbonate species alkalinity
+        species = results.get('species_molality', {})
+        hco3 = species.get('HCO3-', 0)
+        co3 = species.get('CO3-2', 0)
+        
+        # Alkalinity = [HCO3-] + 2*[CO3-2]
+        alk_molal = hco3 + 2 * co3
+        
+        if 'mg/L' in target_units and 'CaCO3' in target_units:
+            # Convert to mg/L as CaCO3
+            return alk_molal * 50000
+        else:
+            return alk_molal
+    
+    elif target_parameter == 'langelier_index':
+        # LSI = pH - pHs
+        # pHs = (9.3 + A + B) - (C + D)
+        # Requires temperature, TDS, Ca hardness, alkalinity
+        ph = summary.get('pH')
+        temp_c = summary.get('temperature_celsius', 25)
+        tds = summary.get('tds_calculated', 0)
+        
+        element_totals = results.get('element_totals_molality', {})
+        ca_molal = element_totals.get('Ca', 0)
+        ca_hardness_caco3 = ca_molal * 100000  # mg/L as CaCO3
+        
+        species = results.get('species_molality', {})
+        alk_molal = species.get('HCO3-', 0) + 2 * species.get('CO3-2', 0)
+        alk_caco3 = alk_molal * 50000  # mg/L as CaCO3
+        
+        # Langelier calculation
+        A = (math.log10(tds) - 1) / 10 if tds > 0 else 0
+        B = -13.12 * math.log10(temp_c + 273) + 34.55
+        C = math.log10(ca_hardness_caco3) - 0.4 if ca_hardness_caco3 > 0 else 0
+        D = math.log10(alk_caco3) if alk_caco3 > 0 else 0
+        
+        phs = (9.3 + A + B) - (C + D)
+        return ph - phs
+    
+    elif target_parameter == 'minimum_si':
+        # Minimum SI among specified minerals
+        minerals = target_config.get('components', ['Calcite', 'Gypsum'])
+        si_values = results.get('saturation_indices', {})
+        
+        valid_si = [si_values.get(m, 999) for m in minerals if si_values.get(m, 999) != -999]
+        return min(valid_si) if valid_si else None
+    
+    elif target_parameter == 'precipitation_potential':
+        # Total mass of precipitates
+        total_ppt = results.get('total_precipitate_g_L', 0)
+        
+        if 'kg/m3' in target_units:
+            return total_ppt / 1000
+        else:
+            return total_ppt
+    
+    elif target_parameter == 'molar_ratio':
+        # Ratio between two elements/species
+        numerator = target_config.get('numerator')
+        denominator = target_config.get('denominator')
+        
+        element_totals = results.get('element_totals_molality', {})
+        species = results.get('species_molality', {})
+        
+        # Try elements first, then species
+        num_val = element_totals.get(numerator, species.get(numerator, 0))
+        den_val = element_totals.get(denominator, species.get(denominator, 0))
+        
+        if den_val > 0:
+            return num_val / den_val
+        else:
+            return float('inf') if num_val > 0 else 0
+    
+    # Existing functionality for other parameters...
+    elif target_parameter == 'Alkalinity':
+        current_value = summary.get('alkalinity_mol_kgw')
+        if target_units and 'mg' in target_units.lower() and 'caco3' in target_units.lower():
+            from utils.constants import ALKALINITY_MOL_TO_MG_CACO3
+            current_value *= ALKALINITY_MOL_TO_MG_CACO3
+        return current_value
+    
+    elif target_parameter == 'SI' and target_config.get('mineral'):
+        mineral_name = target_config.get('mineral')
+        return results.get('saturation_indices', {}).get(mineral_name)
+    
+    elif target_parameter == 'Concentration':
+        element_or_species = target_config.get('element_or_species')
+        element_totals = results.get('element_totals_molality', {})
+        species = results.get('species_molality', {})
+        
+        # Try element first, then species
+        current_value = element_totals.get(element_or_species, species.get(element_or_species))
+        
+        # Unit conversion if needed
+        if current_value is not None and target_units and 'mg' in target_units.lower():
+            # Would need MW lookup for accurate conversion
+            logger.warning(f"Unit conversion from molality to {target_units} requires molecular weight")
+        
+        return current_value
+    
+    else:
+        logger.warning(f"Unknown target parameter: {target_parameter}")
+        return None
+
+
+# Multi-objective optimization support
+class OptimizationObjective:
+    """Define optimization objectives with constraints."""
+    
+    def __init__(self, 
+                 parameter: str,
+                 target_value: float,
+                 tolerance: float,
+                 weight: float = 1.0,
+                 constraint_type: str = 'equality',  # 'equality', 'min', 'max'
+                 units: Optional[str] = None,
+                 **kwargs):
+        self.parameter = parameter
+        self.target_value = target_value
+        self.tolerance = tolerance
+        self.weight = weight
+        self.constraint_type = constraint_type
+        self.units = units
+        self.config = kwargs
+    
+    def evaluate(self, results: Dict[str, Any]) -> Tuple[float, float]:
+        """
+        Evaluate objective function.
+        Returns: (current_value, error)
+        """
+        config = {
+            'parameter': self.parameter,
+            'units': self.units,
+            **self.config
+        }
+        current_value = evaluate_target_parameter(results, config)
+        
+        if current_value is None:
+            return None, float('inf')
+        
+        if self.constraint_type == 'equality':
+            error = abs(current_value - self.target_value)
+        elif self.constraint_type == 'min':
+            # Penalty only if below target
+            error = max(0, self.target_value - current_value)
+        elif self.constraint_type == 'max':
+            # Penalty only if above target
+            error = max(0, current_value - self.target_value)
+        else:
+            error = abs(current_value - self.target_value)
+        
+        return current_value, error * self.weight
 
 
 async def find_reactant_dose_for_target(
@@ -2120,29 +2358,14 @@ KNOBS
 
             summary = results['solution_summary']
 
-            if target_parameter == 'pH':
-                current_value = summary.get('pH')
-            elif target_parameter == 'pe':
-                current_value = summary.get('pe')
-            elif target_parameter == 'Alkalinity':
-                current_value = summary.get('alkalinity_mol_kgw')
-                if target_units and 'mg' in target_units.lower() and 'caco3' in target_units.lower():
-                    from utils.constants import ALKALINITY_MOL_TO_MG_CACO3
-                    current_value *= ALKALINITY_MOL_TO_MG_CACO3
-            elif target_parameter == 'SI' and mineral_name and 'saturation_indices' in results:
-                current_value = results.get('saturation_indices', {}).get(mineral_name)
-            elif target_parameter == 'Concentration' and element_or_species:
-                if 'element_totals_molality' in results and element_or_species in results['element_totals_molality']:
-                    current_value = results['element_totals_molality'][element_or_species]
-                elif 'species_molality' in results and element_or_species in results['species_molality']:
-                    current_value = results['species_molality'][element_or_species]
-                else:
-                    logger.warning(f"Target element/species '{element_or_species}' not found in results.")
-
-                # Unit conversion if needed
-                if current_value is not None and target_units and 'mg' in target_units.lower():
-                    logger.warning(f"Basic unit conversion from molality to {target_units}")
-                    # Implement conversion if needed
+            # Use enhanced target parameter evaluation
+            target_config = {
+                'parameter': target_parameter,
+                'units': target_units,
+                'mineral': mineral_name,
+                'element_or_species': element_or_species
+            }
+            current_value = evaluate_target_parameter(results, target_config)
 
             # Check if we've reached the target
             if current_value is None:

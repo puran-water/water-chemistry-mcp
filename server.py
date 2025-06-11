@@ -29,21 +29,39 @@ logger = logging.getLogger("water-chemistry-mcp")
 # Initialize the MCP server
 mcp = FastMCP("water-chemistry-calculator")
 
-# Import core tools for industrial wastewater applications
+# Import core tools and batch processing for client testing
 from tools.solution_speciation import calculate_solution_speciation
 from tools.chemical_addition import simulate_chemical_addition
 from tools.dosing_requirement import calculate_dosing_requirement
 from tools.solution_mixing import simulate_solution_mixing
 from tools.scaling_potential import predict_scaling_potential
 from tools.calculation_sheet_generator import generate_calculation_sheet
+from tools.batch_processing import batch_process_scenarios
 
-# Register core tools with MCP
-mcp.tool()(calculate_solution_speciation)
-mcp.tool()(simulate_chemical_addition)
-mcp.tool()(calculate_dosing_requirement)
-mcp.tool()(simulate_solution_mixing)
-mcp.tool()(predict_scaling_potential)
-mcp.tool()(generate_calculation_sheet)
+# Enhanced tools are temporarily disabled pending additional work
+# from tools.dosing_requirement import calculate_dosing_requirement_enhanced
+# from tools.batch_processing import (
+#     generate_lime_softening_curve,
+#     calculate_lime_softening_dose,
+#     optimize_phosphorus_removal,
+#     optimize_multi_reagent_treatment
+# )
+
+# Register core tools and batch processing for client testing
+mcp.tool()(calculate_solution_speciation)       # Tool 1: Solution speciation and equilibrium analysis
+mcp.tool()(simulate_chemical_addition)          # Tool 2: Chemical addition with precipitation
+mcp.tool()(calculate_dosing_requirement)        # Tool 3: Basic dosing optimization
+mcp.tool()(simulate_solution_mixing)            # Tool 4: Solution blending and mixing
+mcp.tool()(predict_scaling_potential)           # Tool 5: Scaling risk assessment
+mcp.tool()(generate_calculation_sheet)          # Tool 6: Engineering calculation sheets
+mcp.tool()(batch_process_scenarios)             # Tool 7: Parallel scenario processing
+
+# Enhanced tools are temporarily disabled pending additional work
+# mcp.tool()(calculate_dosing_requirement_enhanced)  # Enhanced: Multi-objective dosing optimization
+# mcp.tool()(generate_lime_softening_curve)          # Enhanced: Lime softening dose-response curves
+# mcp.tool()(calculate_lime_softening_dose)          # Enhanced: Specialized lime softening optimization
+# mcp.tool()(optimize_phosphorus_removal)            # Enhanced: Phosphorus removal optimization
+# mcp.tool()(optimize_multi_reagent_treatment)       # Enhanced: Advanced multi-reagent optimization
 
 # Log information about available dependencies
 from utils.import_helpers import PHREEQPYTHON_AVAILABLE
@@ -80,13 +98,21 @@ if __name__ == "__main__":
         logger.warning("PhreeqPython not available, cannot use PHREEQC databases")
     
     # Log which tools are registered
-    logger.info("Registered core tools for industrial wastewater:")
-    logger.info("  - calculate_solution_speciation: Water quality analysis")
-    logger.info("  - simulate_chemical_addition: Treatment simulation with precipitation")
-    logger.info("  - calculate_dosing_requirement: Optimal dosing calculations")
-    logger.info("  - simulate_solution_mixing: Stream blending analysis")
-    logger.info("  - predict_scaling_potential: Scaling risk and membrane system analysis")
-    logger.info("  - generate_calculation_sheet: Engineering calculation documentation")
+    logger.info("=== WATER CHEMISTRY MCP SERVER - CLIENT TESTING MODE ===\n")
+    logger.info("Registered 7 tools for MCP client testing:")
+    logger.info("\nCORE ANALYSIS TOOLS (6):")
+    logger.info("  1. calculate_solution_speciation: Water quality analysis and equilibrium speciation")
+    logger.info("  2. simulate_chemical_addition: Treatment simulation with precipitation modeling")
+    logger.info("  3. calculate_dosing_requirement: Basic optimal dosing calculations")
+    logger.info("  4. simulate_solution_mixing: Stream blending and mixing analysis")
+    logger.info("  5. predict_scaling_potential: Scaling risk assessment for all systems")
+    logger.info("  6. generate_calculation_sheet: Engineering calculation documentation")
+    logger.info("\nBATCH PROCESSING TOOL (1):")
+    logger.info("  7. batch_process_scenarios: Parallel scenario evaluation and parameter sweeps")
+    logger.info("\nDISABLED ENHANCED TOOLS (pending additional work):")
+    logger.info("  • 5 enhanced optimization tools temporarily disabled for refinement")
+    logger.info("  • Will be re-enabled after core tool validation")
+    logger.info("\n=== SERVER READY FOR MCP CLIENT TESTING ===")
     
     # Start the server
     mcp.run()

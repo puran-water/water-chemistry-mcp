@@ -19,13 +19,9 @@ from utils.helpers import (
 
 logger = logging.getLogger(__name__)
 
-# Import enhanced membrane scaling analysis if available
-try:
-    from .membrane_scaling_potential import predict_membrane_scaling_potential
-    MEMBRANE_SCALING_AVAILABLE = True
-except ImportError:
-    MEMBRANE_SCALING_AVAILABLE = False
-    logger.warning("Enhanced membrane scaling analysis not available")
+# Membrane scaling analysis has been removed as per expert review
+# (was entirely heuristics-based and not scientifically sound)
+MEMBRANE_SCALING_AVAILABLE = False
 
 async def predict_scaling_potential_legacy(input_data: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -138,25 +134,17 @@ async def predict_scaling_potential_legacy(input_data: Dict[str, Any]) -> Dict[s
 async def predict_scaling_potential(input_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Main scaling potential prediction function.
-    Routes to membrane-specific analysis if recovery parameters are provided.
+    Performs standard mineral scaling analysis using PHREEQC saturation indices.
     """
-    # Check if this is a membrane system analysis
+    # Check if membrane system parameters are provided
     if any(key in input_data for key in ['target_recovery', 'recovery_rate', 'concentration_factor']):
-        if PHREEQPYTHON_AVAILABLE and MEMBRANE_SCALING_AVAILABLE:
-            logger.info("Using enhanced membrane scaling analysis")
-            try:
-                return await predict_membrane_scaling_potential(input_data)
-            except Exception as e:
-                logger.warning(f"Membrane scaling analysis failed: {e}, falling back to standard analysis")
-                return await predict_scaling_potential_legacy(input_data)
-        else:
-            logger.warning("Membrane scaling requested but enhanced analysis not available")
-            # Add warning to standard output
-            result = await predict_scaling_potential_legacy(input_data)
-            if 'warnings' not in result:
-                result['warnings'] = []
-            result['warnings'].append("Enhanced membrane scaling analysis not available. Results show feed water only.")
-            return result
+        logger.warning("Membrane scaling analysis has been removed due to scientific integrity concerns")
+        # Add warning to standard output
+        result = await predict_scaling_potential_legacy(input_data)
+        if 'warnings' not in result:
+            result['warnings'] = []
+        result['warnings'].append("Membrane scaling analysis removed. Use standard scaling analysis for feed water only.")
+        return result
     else:
         # Standard scaling analysis
         return await predict_scaling_potential_legacy(input_data)

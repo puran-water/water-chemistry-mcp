@@ -169,17 +169,10 @@ async def calculate_dosing_requirement_legacy(input_data: Dict[str, Any]) -> Dic
                     requested_minerals = input_model.equilibrium_minerals
                     logger.info(f"Using user-specified minerals: {', '.join(requested_minerals)}")
                 else:
-                    # No minerals specified - select based on water chemistry
-                    from utils.constants import select_minerals_for_water_chemistry
-                    
-                    # Extract water chemistry from the input model
-                    water_analysis = {}
-                    if hasattr(input_model, 'initial_solution') and hasattr(input_model.initial_solution, 'analysis'):
-                        water_analysis = input_model.initial_solution.analysis
-                    
-                    # Get appropriate minerals based on water chemistry
-                    requested_minerals = select_minerals_for_water_chemistry(water_analysis)
-                    logger.info(f"Automatically selected minerals based on water chemistry: {', '.join(requested_minerals)}")
+                    # No minerals specified - use full database mineral list for comprehensive precipitation modeling
+                    # This addresses expert review concern about missing precipitate when using limited mineral lists
+                    requested_minerals = database_manager.get_compatible_minerals(database_path)
+                    logger.info(f"Using full database mineral list ({len(requested_minerals)} minerals) for comprehensive precipitation modeling")
                 
                 dose_mmol, final_results_dict, iterations_done = await find_reactant_dose_for_target(
                     initial_solution_str=initial_sol_str,

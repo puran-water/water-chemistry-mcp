@@ -492,8 +492,15 @@ def build_selected_output_block(
     surface: bool = True,
     exchange: bool = True,
     kinetics: bool = True,
+    composite_parameters: bool = False,
     ) -> str:
-    """Builds a standard SELECTED_OUTPUT block."""
+    """
+    Builds a SELECTED_OUTPUT block with optional composite parameter calculations.
+    
+    Args:
+        composite_parameters: If True, adds PHREEQC-native calculations for composite
+                             parameters like total hardness, carbonate alkalinity, etc.
+    """
     lines = [
         f"SELECTED_OUTPUT {block_num}",
         "    -reset false", # Append to default selected output
@@ -513,6 +520,28 @@ def build_selected_output_block(
     if phases: lines.append("    -eq true")  # Equilibrium phases
     if saturation_indices: lines.append("    -si true")  # Saturation indices
     if gases: lines.append("    -gas true")  # Gas phase components
+    
+    # Add composite parameter calculations using PHREEQC's native calculation engine
+    if composite_parameters:
+        lines.append("    # Composite parameters calculated by PHREEQC")
+        
+        # Total hardness as CaCO3 (mg/L): (Ca + Mg) * 50000 (equivalent weight of CaCO3)
+        lines.append('    -user_punch true')
+        lines.append('    -headings "Total_Hardness_CaCO3" "Carbonate_Alkalinity_CaCO3" "TDS_Species"')
+        lines.append('    -start')
+        lines.append('        10 total_hardness = (TOT("Ca") + TOT("Mg")) * 50000')
+        lines.append('        20 carb_alk = (MOL("HCO3-") + 2*MOL("CO3-2")) * 50000')
+        lines.append('        30 tds_calc = 0')
+        lines.append('        40 FOR i = 1 TO MOL_NUMBER')
+        lines.append('        50   species_name$ = MOL_NAME$(i)')
+        lines.append('        60   IF species_name$ <> "H2O" AND species_name$ <> "H+" AND species_name$ <> "OH-" THEN')
+        lines.append('        70     molal = MOL(species_name$)')
+        lines.append('        80     mw = EQ_WEIGHT(species_name$)')
+        lines.append('        90     IF mw > 0 THEN tds_calc = tds_calc + molal * mw * 1000')
+        lines.append('        100  ENDIF')
+        lines.append('        110 NEXT i')
+        lines.append('        120 PUNCH total_hardness, carb_alk, tds_calc')
+        lines.append('    -end')
     
     # Avoid problematic options
     # No -elements, -surface, -exchange, -pressure, -density

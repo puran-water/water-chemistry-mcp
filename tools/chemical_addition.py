@@ -108,17 +108,10 @@ async def simulate_chemical_addition(input_data: Dict[str, Any]) -> Dict[str, An
                             f"'{os.path.basename(database_path)}' and no alternative was found."
                         )
             else:
-                # No minerals specified - select based on water chemistry
-                from utils.constants import select_minerals_for_water_chemistry
-                
-                # Extract water chemistry from the input model
-                water_analysis = {}
-                if hasattr(input_model, 'initial_solution') and hasattr(input_model.initial_solution, 'analysis'):
-                    water_analysis = input_model.initial_solution.analysis
-                
-                # Get appropriate minerals based on water chemistry
-                equilibrium_minerals = select_minerals_for_water_chemistry(water_analysis, database_path)
-                logger.info(f"Automatically selected minerals based on water chemistry: {', '.join(equilibrium_minerals)}")
+                # No minerals specified - use full database mineral list for comprehensive precipitation modeling
+                # This addresses expert review concern about missing precipitate when using limited mineral lists
+                equilibrium_minerals = database_manager.get_compatible_minerals(database_path)
+                logger.info(f"Using full database mineral list ({len(equilibrium_minerals)} minerals) for comprehensive precipitation modeling")
         
         # Check if kinetic modeling is requested
         if input_model.kinetic_parameters and input_model.kinetic_parameters.enable_kinetics:

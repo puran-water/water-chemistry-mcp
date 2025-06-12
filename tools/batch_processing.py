@@ -99,7 +99,7 @@ async def process_single_scenario(base_solution: Dict[str, Any],
             'initial_solution': base_solution,
             'reactants': scenario.get('reactants', []),
             'allow_precipitation': scenario.get('allow_precipitation', True),
-            'equilibrium_minerals': scenario.get('equilibrium_minerals', []),
+            'equilibrium_minerals': scenario.get('equilibrium_minerals'),
             'database': scenario.get('database', 'minteq.dat')
         })
     
@@ -168,7 +168,7 @@ async def process_treatment_step(current_solution: Dict[str, Any],
             'initial_solution': current_solution,
             'reactants': step.get('reactants', []),
             'allow_precipitation': step.get('allow_precipitation', True),
-            'equilibrium_minerals': step.get('equilibrium_minerals', []),
+            'equilibrium_minerals': step.get('equilibrium_minerals'),
             'database': step.get('database', 'minteq.dat')
         })
     
@@ -243,7 +243,7 @@ async def generate_lime_softening_curve(
             'name': f'Lime_{dose}mmol',
             'type': 'chemical_addition',
             'reactants': [{'formula': 'Ca(OH)2', 'amount': dose, 'units': 'mmol'}],
-            'equilibrium_minerals': ['Calcite', 'Brucite', 'Dolomite']
+            'equilibrium_minerals': None  # Use full database mineral list for comprehensive precipitation modeling
         })
     
     # Run batch processing
@@ -353,7 +353,7 @@ async def calculate_lime_softening_dose(
             'units': 'mg/L as CaCO3'
         }],
         'allow_precipitation': True,
-        'equilibrium_minerals': ['Calcite', 'Brucite', 'Dolomite'],
+        'equilibrium_minerals': None,  # Use full database mineral list for comprehensive precipitation modeling
         'database': database,
         'optimization_method': 'adaptive',
         'max_iterations': 30

@@ -504,7 +504,7 @@ class SimulateChemicalAdditionInput(BaseModel):
     initial_solution: WaterAnalysisInput = Field(..., description="The starting water composition.")
     reactants: List[ReactantInput] = Field(..., description="List of chemicals to add.")
     allow_precipitation: Optional[bool] = Field(True, description="Whether to allow mineral precipitation/dissolution. Default True.")
-    equilibrium_minerals: Optional[List[str]] = Field(['Calcite', 'Aragonite', 'Dolomite', 'Gypsum', 'Anhydrite', 'Fe(OH)3(a)', 'Al(OH)3(a)', 'Mg(OH)2', 'SiO2(a)', 'Brucite'], description="List of potential minerals to consider for equilibrium (if allow_precipitation is True). Add more as needed.")
+    equilibrium_minerals: Optional[List[str]] = Field(None, description="List of potential minerals to consider for equilibrium (if allow_precipitation is True). Defaults to full database mineral list for comprehensive precipitation modeling.")
     kinetic_parameters: Optional[KineticParameters] = Field(None, description="Optional parameters for kinetic precipitation modeling.")
     database: Optional[str] = Field(None, description="Path or name of the PHREEQC database file to use.")
     temperature_celsius: Optional[float] = Field(None, description="Override temperature for reaction step (defaults to initial_solution temp).")
@@ -542,7 +542,7 @@ class CalculateDosingRequirementInput(BaseModel):
     initial_guess_mmol: Optional[float] = Field(1.0, description="Initial guess for the dose in mmol (per liter). Default 1.0.")
     database: Optional[str] = Field(None, description="Path or name of the PHREEQC database file to use.")
     allow_precipitation: Optional[bool] = Field(True, description="Whether to allow mineral precipitation/dissolution during iteration. Default True.")
-    equilibrium_minerals: Optional[List[str]] = Field(['Calcite', 'Aragonite', 'Dolomite', 'Gypsum', 'Anhydrite', 'Fe(OH)3(a)', 'Al(OH)3(a)', 'Mg(OH)2', 'SiO2(a)', 'Brucite'], description="List of potential minerals to allow for equilibrium during iteration.")
+    equilibrium_minerals: Optional[List[str]] = Field(None, description="List of potential minerals to allow for equilibrium during iteration. Defaults to full database mineral list for comprehensive precipitation modeling.")
 
 class CalculateDosingRequirementOutput(BaseModel):
     required_dose_mmol_per_L: Optional[float] = Field(None, description="Calculated dose of the reagent in mmol per liter of initial solution.")
@@ -782,7 +782,7 @@ class SimulateKineticReactionInput(BaseModel):
     kinetic_reactions: KineticReactionDefinition = Field(..., description="Definition of the kinetic reactions and rates.")
     time_steps: TimeStepDefinition = Field(..., description="Time steps for the kinetic simulation.")
     allow_precipitation: Optional[bool] = Field(True, description="Whether to allow mineral precipitation/dissolution during kinetics. Default True.")
-    equilibrium_minerals: Optional[List[str]] = Field(['Calcite', 'Aragonite', 'Dolomite', 'Gypsum', 'Anhydrite', 'Fe(OH)3(a)', 'Al(OH)3(a)', 'Mg(OH)2', 'SiO2(a)', 'Brucite'], description="List of potential minerals to allow for equilibrium during kinetics.")
+    equilibrium_minerals: Optional[List[str]] = Field(None, description="List of potential minerals to allow for equilibrium during kinetics. Defaults to full database mineral list for comprehensive precipitation modeling.")
     database: Optional[str] = Field(None, description="Path or name of the PHREEQC database file to use.")
 
 class SimulateKineticReactionOutput(BaseModel):

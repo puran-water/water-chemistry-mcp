@@ -196,7 +196,15 @@ async def calculate_dosing_requirement_phreeqpython(input_data: Dict[str, Any]) 
         precipitation_info = {}
         
         if input_model.allow_precipitation:
-            minerals = input_model.equilibrium_minerals or get_default_minerals(solution_data)
+            if input_model.equilibrium_minerals:
+                # User specified minerals
+                minerals = input_model.equilibrium_minerals
+            else:
+                # Use full database mineral list for comprehensive precipitation modeling
+                # This addresses expert review concern about missing precipitate when using limited mineral lists
+                from utils.database_management import database_manager
+                minerals = database_manager.get_compatible_minerals(database_path or 'phreeqc.dat')
+                logger.info(f"Using full database mineral list ({len(minerals)} minerals) for precipitation modeling")
             precipitation_info = check_precipitation(final_solution, minerals)
         
         # Calculate practical dose information

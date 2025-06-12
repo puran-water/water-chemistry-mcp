@@ -3,10 +3,10 @@ Comprehensive test script for calculate_dosing_requirement tool.
 Tests both equilibrium and kinetic precipitation modeling.
 
 Run from Windows cmd.exe with:
-cd C:\Users\hvksh\mcp-servers
-venv\Scripts\activate
+cd C:/Users/hvksh/mcp-servers
+venv/Scripts/activate
 cd water-chemistry-mcp
-python tests\test_dosing_requirement.py
+python tests/test_dosing_requirement.py
 """
 
 import asyncio
@@ -19,6 +19,7 @@ from typing import Dict, Any, List, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tools.dosing_requirement import calculate_dosing_requirement
+from tools.phreeqc_wrapper import find_reactant_dose_for_target, build_solution_block
 
 
 class TestResults:
@@ -556,6 +557,80 @@ async def test_temperature_effects(results: TestResults):
         results.record_fail(test_name, str(e))
 
 
+async def test_composite_parameters_phreeqc_selected_output(results: TestResults):
+    """Test that composite parameters use PHREEQC SELECTED_OUTPUT calculations"""
+    test_name = "Composite Parameters PHREEQC SELECTED_OUTPUT"
+    
+    try:
+        # Hard water with high Ca and Mg
+        hard_water = {
+            'temperature_celsius': 25.0,
+            'pressure_atm': 1.0,
+            'pH': 7.5,
+            'pe': 4.0,
+            'units': 'mg/L',
+            'analysis': {
+                'Ca': 200,     # High calcium
+                'Mg': 50,      # High magnesium 
+                'HCO3': 300,   # High bicarbonate
+                'SO4': 100,
+                'Cl': 50
+            }
+        }
+        
+        solution_str = build_solution_block(hard_water)
+        
+        # Test total hardness target using PHREEQC calculations
+        dose, final_results, iterations = await find_reactant_dose_for_target(
+            initial_solution_str=solution_str,
+            target_parameter='total_hardness',
+            target_value=85.0,  # Target hardness in mg/L as CaCO3
+            reagent_formula='Ca(OH)2',
+            target_units='mg/L as CaCO3',
+            initial_guess_mmol=1.0,
+            max_iterations=15,
+            tolerance=5.0,  # 5 mg/L tolerance
+            database_path='databases/official/minteq.dat',
+            allow_precipitation=True
+        )
+        
+        # Verify that dose was found
+        assert dose is not None, "No dose found for total hardness target"
+        assert 0.1 <= dose <= 50.0, f"Unrealistic dose: {dose} mmol/L"
+        assert iterations <= 15, f"Too many iterations: {iterations}"
+        
+        # Verify that selected_output_data exists in results
+        assert 'selected_output_data' in final_results, "SELECTED_OUTPUT data not found in results"
+        selected_output = final_results['selected_output_data']
+        
+        # Check if PHREEQC calculated total hardness directly
+        if 'Total_Hardness_CaCO3' in selected_output:
+            phreeqc_hardness = selected_output['Total_Hardness_CaCO3']
+            assert isinstance(phreeqc_hardness, (int, float)), "PHREEQC hardness not numeric"
+            assert 50 <= phreeqc_hardness <= 150, f"PHREEQC hardness out of range: {phreeqc_hardness}"
+            print(f"  PHREEQC calculated hardness: {phreeqc_hardness:.1f} mg/L as CaCO3")
+        
+        # Also verify manual calculation still works as fallback
+        if 'element_totals_molality' in final_results:
+            totals = final_results['element_totals_molality']
+            ca_molal = totals.get('Ca', 0)
+            mg_molal = totals.get('Mg', 0)
+            manual_hardness = (ca_molal + mg_molal) * 100000  # Convert to mg/L as CaCO3
+            print(f"  Manual calculation hardness: {manual_hardness:.1f} mg/L as CaCO3")
+            
+            # If both exist, they should be similar
+            if 'Total_Hardness_CaCO3' in selected_output:
+                phreeqc_hardness = selected_output['Total_Hardness_CaCO3']
+                diff = abs(phreeqc_hardness - manual_hardness)
+                assert diff < 20, f"PHREEQC vs manual hardness differ too much: {diff:.1f} mg/L"
+        
+        print(f"  Final dose: {dose:.3f} mmol/L Ca(OH)2 after {iterations} iterations")
+        results.record_pass(test_name)
+        
+    except Exception as e:
+        results.record_fail(test_name, str(e))
+
+
 async def main():
     """Run all tests"""
     print(f"\nCalculate Dosing Requirement Tool Test Suite")
@@ -576,6 +651,7 @@ async def main():
     await test_heavy_metal_removal(results)
     await test_edge_cases(results)
     await test_temperature_effects(results)
+    await test_composite_parameters_phreeqc_selected_output(results)
     
     # Print summary
     results.print_summary()

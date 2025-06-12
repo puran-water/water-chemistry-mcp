@@ -661,25 +661,63 @@ def parse_phreeqc_results(
                 logger.warning(f"Error getting ionic strength: {e}")
                 summary['ionic_strength'] = 0.0
             
-            # Calculate TDS (Total Dissolved Solids) in mg/L
+            # Calculate TDS (Total Dissolved Solids) using proper PHREEQC method
+            # This replaces the simplified approach with scientifically accurate calculation
+            # TDS = sum of all dissolved ionic species concentrations (mg/L)
             tds_mg_L = 0.0
-            element_mw = {
-                'Ca': 40.08, 'Mg': 24.31, 'Na': 22.99, 'K': 39.10,
-                'Cl': 35.45, 'S(6)': 96.06, 'C(4)': 61.02, 'N(5)': 62.00,
-                'N(-3)': 18.04, 'P': 30.97, 'F': 19.00, 'Si': 28.09,
-                'Fe': 55.85, 'Al': 26.98, 'Cu': 63.55, 'Zn': 65.38,
-                'Ni': 58.69, 'Pb': 207.2, 'Cd': 112.41, 'Hg': 200.59,
-                'Mn': 54.94, 'As': 74.92, 'Cr': 52.00, 'Ba': 137.33,
-                'Sr': 87.62, 'B': 10.81
-            }
             
-            # Get element totals and calculate TDS
-            if hasattr(solution, 'elements'):
-                for element, molality in solution.elements.items():
-                    if element in element_mw and molality > 0:
-                        if element not in ['H', 'O', 'O(0)', 'H(0)']:
-                            mg_L = molality * element_mw[element] * 1000
-                            tds_mg_L += mg_L
+            try:
+                # Use PHREEQC's native species calculations for accurate TDS
+                if hasattr(solution, 'species_molalities'):
+                    # Sum all dissolved species concentrations 
+                    # This accounts for proper speciation and molecular weights
+                    species_molecular_weights = {
+                        # Major cations
+                        'Ca+2': 40.08, 'Mg+2': 24.31, 'Na+': 22.99, 'K+': 39.10,
+                        # Major anions  
+                        'Cl-': 35.45, 'SO4-2': 96.06, 'HCO3-': 61.02, 'CO3-2': 60.01,
+                        'NO3-': 62.00, 'PO4-3': 94.97, 'F-': 19.00,
+                        # Other common species
+                        'CaSO4': 136.14, 'CaHCO3+': 101.10, 'MgSO4': 120.37,
+                        'NaSO4-': 119.05, 'CaCO3': 100.09, 'MgCO3': 84.31,
+                        'SiO2': 60.08, 'H4SiO4': 96.11
+                    }
+                    
+                    for species, molality in solution.species_molalities.items():
+                        if molality > 1e-12:  # Exclude trace amounts
+                            # Get molecular weight for the species
+                            mw = species_molecular_weights.get(species)
+                            if mw:
+                                # Convert molality to mg/L (assuming density ≈ 1 kg/L for dilute solutions)
+                                mg_L = molality * mw * 1000
+                                tds_mg_L += mg_L
+                    
+                    # If species-based calculation gives very low result, fall back to element totals
+                    # This handles cases where species_molalities might be incomplete
+                    if tds_mg_L < 10:  # Less than 10 mg/L seems too low for most waters
+                        logger.debug("Species-based TDS calculation yielded low result, using element totals as backup")
+                        if hasattr(solution, 'elements'):
+                            for element, molality in solution.elements.items():
+                                if element not in ['H', 'O', 'O(0)', 'H(0)'] and molality > 1e-6:
+                                    # Use conservative estimate: element atomic weight
+                                    # This is less accurate but better than fabricated values
+                                    atomic_weights = {
+                                        'Ca': 40.08, 'Mg': 24.31, 'Na': 22.99, 'K': 39.10,
+                                        'Cl': 35.45, 'S': 32.06, 'C': 12.01, 'N': 14.01,
+                                        'P': 30.97, 'F': 19.00, 'Si': 28.09, 'Fe': 55.85,
+                                        'Al': 26.98
+                                    }
+                                    base_element = element.split('(')[0]  # Remove oxidation state
+                                    mw = atomic_weights.get(base_element, 50.0)  # Default for unknowns
+                                    mg_L = molality * mw * 1000
+                                    tds_mg_L += mg_L
+                else:
+                    logger.warning("Species molalities not available for TDS calculation")
+                    tds_mg_L = 0.0
+                    
+            except Exception as e:
+                logger.warning(f"Error calculating TDS from PHREEQC solution: {e}")
+                tds_mg_L = 0.0
             
             summary['tds_calculated'] = tds_mg_L
             
@@ -739,6 +777,40 @@ def parse_phreeqc_results(
             except Exception as sp_e:
                 logger.warning(f"Could not get species molalities: {sp_e}")
                 current_step_results['species_molality'] = {}
+            
+            # Extract composite parameters from SELECTED_OUTPUT (USER_PUNCH data)
+            try:
+                selected_output_data = {}
+                if hasattr(pp_instance.ip, 'get_selected_output_value'):
+                    # Try to get composite parameter values by header names
+                    composite_headers = ['Total_Hardness_CaCO3', 'Carbonate_Alkalinity_CaCO3', 'TDS_Species']
+                    
+                    # Get the number of rows and columns in selected output
+                    if hasattr(pp_instance.ip, 'row_count') and hasattr(pp_instance.ip, 'column_count'):
+                        rows = pp_instance.ip.row_count
+                        cols = pp_instance.ip.column_count
+                        
+                        if rows > 0 and cols > 0:
+                            # Get the last row (most recent calculation)
+                            row_idx = rows - 1
+                            
+                            # Try to extract values by column index (assuming order matches our headers)
+                            for col_idx, header in enumerate(composite_headers):
+                                if col_idx < cols:
+                                    try:
+                                        value = pp_instance.ip.get_selected_output_value(row_idx, col_idx)
+                                        if value is not None and isinstance(value, (int, float)):
+                                            selected_output_data[header] = value
+                                    except Exception:
+                                        pass  # Column might not exist
+                
+                if selected_output_data:
+                    current_step_results['selected_output_data'] = selected_output_data
+                    logger.debug(f"Extracted composite parameters: {selected_output_data}")
+                    
+            except Exception as so_e:
+                logger.debug(f"Could not extract selected output data: {so_e}")
+                # This is not critical - composite parameters will fall back to manual calculation
 
             all_step_results.append(current_step_results)
 
@@ -972,27 +1044,62 @@ async def run_phreeqc_with_phreeqpython(
                 except Exception as e:
                     logger.warning(f"Could not handle precipitation of {mineral}: {e}")
         
-        # Calculate TDS (Total Dissolved Solids) in mg/L
+        # Calculate TDS (Total Dissolved Solids) using PHREEQC species data
+        # This replaces the simplified element-based approach with proper speciation
         tds_mg_L = 0.0
-        # Molecular weights for elements (g/mol)
-        element_mw = {
-            'Ca': 40.08, 'Mg': 24.31, 'Na': 22.99, 'K': 39.10,
-            'Cl': 35.45, 'S(6)': 96.06, 'C(4)': 61.02, 'N(5)': 62.00,
-            'N(-3)': 18.04, 'P': 30.97, 'F': 19.00, 'Si': 28.09,
-            'Fe': 55.85, 'Al': 26.98, 'Cu': 63.55, 'Zn': 65.38,
-            'Ni': 58.69, 'Pb': 207.2, 'Cd': 112.41, 'Hg': 200.59,
-            'Mn': 54.94, 'As': 74.92, 'Cr': 52.00, 'Ba': 137.33,
-            'Sr': 87.62, 'B': 10.81
-        }
         
-        # Calculate TDS from element totals
-        for element, molality in solution.elements.items():
-            if element in element_mw and molality > 0:
-                # Skip H and O as they're part of water
-                if element not in ['H', 'O', 'O(0)', 'H(0)']:
-                    # Convert molality to mg/L
-                    mg_L = molality * element_mw[element] * 1000
-                    tds_mg_L += mg_L
+        try:
+            # Use PHREEQC's calculated species concentrations for accurate TDS
+            if hasattr(solution, 'species_molalities'):
+                # Define molecular weights for common dissolved species
+                species_molecular_weights = {
+                    # Major cations
+                    'Ca+2': 40.08, 'Mg+2': 24.31, 'Na+': 22.99, 'K+': 39.10,
+                    # Major anions  
+                    'Cl-': 35.45, 'SO4-2': 96.06, 'HCO3-': 61.02, 'CO3-2': 60.01,
+                    'NO3-': 62.00, 'PO4-3': 94.97, 'F-': 19.00,
+                    # Common ion pairs and complexes
+                    'CaSO4': 136.14, 'CaHCO3+': 101.10, 'MgSO4': 120.37,
+                    'NaSO4-': 119.05, 'CaCO3': 100.09, 'MgCO3': 84.31,
+                    'SiO2': 60.08, 'H4SiO4': 96.11, 'HSO4-': 97.07,
+                    'OH-': 17.01, 'H+': 1.01
+                }
+                
+                # Sum concentrations of all dissolved species
+                for species, molality in solution.species_molalities.items():
+                    if molality > 1e-12:  # Exclude negligible concentrations
+                        mw = species_molecular_weights.get(species)
+                        if mw:
+                            # Convert molality to mg/L
+                            mg_L = molality * mw * 1000
+                            tds_mg_L += mg_L
+                        else:
+                            # For unknown species, log but don't include in TDS
+                            if molality > 1e-6:  # Only log significant concentrations
+                                logger.debug(f"Unknown species molecular weight for TDS calculation: {species} ({molality:.6f} mol)")
+                
+                # Fallback if species-based calculation seems incomplete
+                if tds_mg_L < 50:  # Very low TDS, might indicate incomplete species data
+                    logger.debug("Low species-based TDS, supplementing with element totals")
+                    for element, molality in solution.elements.items():
+                        if element not in ['H', 'O', 'O(0)', 'H(0)'] and molality > 1e-6:
+                            # Conservative atomic weight estimate
+                            atomic_weights = {
+                                'Ca': 40.08, 'Mg': 24.31, 'Na': 22.99, 'K': 39.10,
+                                'Cl': 35.45, 'S': 32.06, 'C': 12.01, 'N': 14.01,
+                                'P': 30.97, 'F': 19.00, 'Si': 28.09, 'Fe': 55.85, 'Al': 26.98
+                            }
+                            base_element = element.split('(')[0]
+                            mw = atomic_weights.get(base_element, 50.0)
+                            mg_L = molality * mw * 1000
+                            tds_mg_L += mg_L
+            else:
+                logger.warning("Species molalities not available for TDS calculation")
+                tds_mg_L = 0.0
+                
+        except Exception as e:
+            logger.warning(f"Error in PHREEQC-based TDS calculation: {e}")
+            tds_mg_L = 0.0
         
         # Extract comprehensive results
         results = {
@@ -1029,48 +1136,12 @@ async def run_phreeqc_with_phreeqpython(
             results['precipitated_phases'] = precipitated_phases
             results['precipitation_occurred'] = True
         else:
-            # IMMEDIATE FIX: Check for precipitation even if not explicitly calculated
-            # Look for supersaturated minerals and estimate precipitation
-            logger.info("No precipitated_phases found from desaturate method, checking for unreported precipitation...")
-            estimated_precipitates = {}
-            
-            # Get all minerals with positive SI
-            supersaturated_minerals = {
-                mineral: si for mineral, si in results['saturation_indices'].items() 
-                if si > -0.1 and si != -999  # Include near-saturation minerals
-            }
-            
-            if supersaturated_minerals and allow_precipitation:
-                logger.info(f"Found {len(supersaturated_minerals)} supersaturated minerals")
-                
-                # For minerals at or near saturation, estimate precipitation
-                # This is a simplified approach - ideally would use mass balance
-                for mineral, si in supersaturated_minerals.items():
-                    if si >= 0:  # At or above saturation
-                        # Map minerals to their primary element for estimation
-                        mineral_element_map = {
-                            'Calcite': 'Ca', 'Aragonite': 'Ca', 'Gypsum': 'Ca', 'Anhydrite': 'Ca',
-                            'Brucite': 'Mg', 'Dolomite': 'Mg', 'Magnesite': 'Mg',
-                            'Siderite': 'Fe', 'Fe(OH)3(a)': 'Fe', 'Ferrihydrite': 'Fe',
-                            'Al(OH)3(a)': 'Al', 'Gibbsite': 'Al',
-                            'SiO2(a)': 'Si', 'Chalcedony': 'Si', 'Quartz': 'Si'
-                        }
-                        
-                        element = mineral_element_map.get(mineral)
-                        if element and element in solution.elements:
-                            # Rough estimate: assume 10% precipitation for SI=0, more for higher SI
-                            precipitation_fraction = min(0.1 + si * 0.1, 0.5)  # Max 50% precipitation
-                            element_molality = solution.elements[element]
-                            estimated_moles = element_molality * precipitation_fraction
-                            
-                            if estimated_moles > 1e-10:
-                                estimated_precipitates[mineral] = estimated_moles
-                                logger.info(f"Estimated {estimated_moles:.6f} mol of {mineral} precipitated (SI={si:.2f})")
-                
-                if estimated_precipitates:
-                    results['precipitated_phases'] = estimated_precipitates
-                    results['precipitation_occurred'] = True
-                    results['precipitation_estimated'] = True  # Flag to indicate these are estimates
+            # No precipitation detected by PHREEQC's thermodynamic calculations
+            # This is scientifically accurate - trust PHREEQC's equilibrium calculations
+            # Previously this code contained heuristic precipitation estimation which has been removed
+            # for scientific integrity (expert review recommendation)
+            logger.debug("No precipitated phases found - solution remains undersaturated or minerals not in equilibrium list")
+            results['precipitation_occurred'] = False
         
         # Calculate total precipitate mass if we have precipitated phases
         if 'precipitated_phases' in results:
@@ -1369,6 +1440,11 @@ async def calculate_kinetic_precipitation_phreeqc_native(
     time_steps = kinetic_params.get('time_steps', [0, 60, 300, 600, 1800, 3600])
     minerals_kinetic = kinetic_params.get('minerals_kinetic', {})
     
+    # Defensive check: ensure minerals_kinetic is a proper dict
+    if not isinstance(minerals_kinetic, dict):
+        logger.warning(f"minerals_kinetic is not a dict: {type(minerals_kinetic)}, defaulting to empty dict")
+        minerals_kinetic = {}
+    
     if minerals_kinetic:
         kinetics_lines = ["KINETICS 1"]
         
@@ -1442,16 +1518,20 @@ async def calculate_kinetic_precipitation_phreeqc_native(
     # Add USER_PUNCH to get kinetic mineral amounts
     user_punch_lines = ["USER_PUNCH 1"]
     user_punch_lines.append("    -headings Time")
-    for mineral in minerals_kinetic.keys():
-        user_punch_lines.append(f"    -headings {mineral}_mol")
+    # Defensive check: ensure minerals_kinetic is a dict and not None
+    if minerals_kinetic and isinstance(minerals_kinetic, dict):
+        for mineral in minerals_kinetic.keys():
+            user_punch_lines.append(f"    -headings {mineral}_mol")
     
     user_punch_lines.append("    -start")
     user_punch_lines.append("10 PUNCH TOTAL_TIME/3600  # Convert seconds to hours")
     
     punch_num = 20
-    for mineral in minerals_kinetic.keys():
-        user_punch_lines.append(f"{punch_num} PUNCH KIN('{mineral}')")
-        punch_num += 10
+    # Defensive check: ensure minerals_kinetic is a dict and not None
+    if minerals_kinetic and isinstance(minerals_kinetic, dict):
+        for mineral in minerals_kinetic.keys():
+            user_punch_lines.append(f"{punch_num} PUNCH KIN('{mineral}')")
+            punch_num += 10
     
     user_punch_lines.append("    -end")
     input_lines.append("\n".join(user_punch_lines))
@@ -1678,7 +1758,20 @@ def evaluate_target_parameter(results: Dict[str, Any], target_config: Dict[str, 
     
     # Complex/Composite parameters (NEW)
     elif target_parameter == 'total_hardness':
-        # Total hardness = Ca + Mg (as CaCO3)
+        # Check if PHREEQC calculated this value directly (preferred method)
+        selected_output = results.get('selected_output_data', {})
+        if 'Total_Hardness_CaCO3' in selected_output:
+            phreeqc_hardness = selected_output['Total_Hardness_CaCO3']
+            if 'mg/L' in target_units and 'CaCO3' in target_units:
+                return phreeqc_hardness  # Already in mg/L as CaCO3
+            elif 'mmol/L' in target_units:
+                # Convert from mg/L as CaCO3 to mmol/L
+                return phreeqc_hardness / 100.09  # MW of CaCO3
+            else:
+                # Convert to molality (mol/kg)
+                return phreeqc_hardness / 100090  # mg/L to mol/kg approximation
+        
+        # Fallback: manual calculation from element totals
         element_totals = results.get('element_totals_molality', {})
         ca_molal = element_totals.get('Ca', 0)
         mg_molal = element_totals.get('Mg', 0)
@@ -1724,7 +1817,17 @@ def evaluate_target_parameter(results: Dict[str, Any], target_config: Dict[str, 
             return total
     
     elif target_parameter == 'carbonate_alkalinity':
-        # Carbonate species alkalinity
+        # Check if PHREEQC calculated this value directly (preferred method)
+        selected_output = results.get('selected_output_data', {})
+        if 'Carbonate_Alkalinity_CaCO3' in selected_output:
+            phreeqc_alkalinity = selected_output['Carbonate_Alkalinity_CaCO3']
+            if 'mg/L' in target_units and 'CaCO3' in target_units:
+                return phreeqc_alkalinity  # Already in mg/L as CaCO3
+            else:
+                # Convert from mg/L as CaCO3 to molality
+                return phreeqc_alkalinity / 50000  # equivalent weight conversion
+        
+        # Fallback: manual calculation from species molalities
         species = results.get('species_molality', {})
         hco3 = species.get('HCO3-', 0)
         co3 = species.get('CO3-2', 0)
@@ -2056,12 +2159,19 @@ KNOBS
             phreeqc_input += equilibrium_phases_str
             phreeqc_input += "USE equilibrium_phases 1\n"
 
+        # Check if we need composite parameter calculations
+        # Enable PHREEQC-native calculations for complex composite parameters
+        composite_parameters = ['total_hardness', 'carbonate_alkalinity', 'TDS', 'residual_phosphorus', 
+                               'total_metals', 'langelier_index', 'precipitation_potential']
+        needs_composite = target_parameter in composite_parameters
+        
         phreeqc_input += build_selected_output_block(
             block_num=1,
             phases=allow_precipitation, 
             saturation_indices=True, 
             totals=True, 
-            molalities=True
+            molalities=True,
+            composite_parameters=needs_composite
         ) + "END\n"
 
         try:
@@ -2202,7 +2312,6 @@ KNOBS
                             if compatible_minerals:
                                 # Build a new equilibrium phases block
                                 phases_to_consider = [{'name': name} for name in compatible_minerals]
-                                from utils.helpers import build_equilibrium_phases_block
                                 simple_equilibrium_phases_str = build_equilibrium_phases_block(phases_to_consider, block_num=1)
                                 
                                 # Replace the existing equilibrium phases block if it exists

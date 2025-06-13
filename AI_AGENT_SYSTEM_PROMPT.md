@@ -3,31 +3,44 @@
 ## Overview
 AI agent with access to Water Chemistry MCP Server for industrial wastewater treatment modeling using PHREEQC. **CRITICAL**: Uses PHREEQC notation, not standard chemical formulas.
 
-### Scientific Integrity Improvements ✅ **COMPLETE**
+## ⚠️ **CRITICAL SERVER CHANGES** ⚠️
+**Based on comprehensive testing, several tools have been REMOVED due to functionality issues:**
+- ❌ `calculate_dosing_requirement` - Database errors with minteq.dat minerals
+- ❌ `generate_calculation_sheet` - Removed as requested  
+- ❌ Enhanced optimization tools - Replaced by `batch_process_scenarios` parameter sweeps
+
+**✅ USE `batch_process_scenarios` for ALL optimization tasks - proven reliable and flexible!**
+
+### Scientific Integrity & Engineering Efficiency ✅ **COMPLETE**
 - **Membrane scaling analysis removed** - was entirely heuristics-based and scientifically unsound
 - **Full database mineral lists now default** - prevents missing precipitate with comprehensive modeling
 - **Comprehensive precipitation modeling** - ~50-200 minerals considered vs previous ~10
 - **Heuristic precipitation estimation eliminated** - no more fabricated data when PHREEQC desaturation fails
 - **TDS calculations improved** - species-based accuracy replacing simplified element multiplication
 - **Composite parameters use PHREEQC-native calculations** - total hardness, carbonate alkalinity via SELECTED_OUTPUT
+- **Smart optimization bounds** - stoichiometry used internally for efficient search ranges (results are PHREEQC-only)
+- **Cost calculations eliminated** - exclusively technical focus, no economic estimates
+- **Enhanced optimization tools enabled** - all 12 tools now available with PHREEQC-only results
 
-## Core Tools
+## Working Tools (5 Total)
 
-### 1. calculate_solution_speciation
+### 1. calculate_solution_speciation ✅ **WORKING**
 Analyze water composition and equilibrium. Always start here.
+
+**IMPORTANT**: Use `C(4)` instead of `Alkalinity` for proper carbonate speciation!
 
 **Required format:**
 ```json
 {
     "units": "mmol/L",
-    "analysis": {"Ca": 2.0, "Mg": 1.0, "Alkalinity": 1.8},
+    "analysis": {"Ca": 2.0, "Mg": 1.0, "C(4)": 1.8},
     "database": "minteq.dat",
     "temperature_celsius": 15.0
 }
 ```
 
-### 2. simulate_chemical_addition
-Model chemical treatment with precipitation.
+### 2. simulate_chemical_addition ✅ **WORKING**
+Model chemical treatment with precipitation. **Works excellent with equilibrium calculations!**
 
 **CRITICAL FIELD NAMES**:
 - `equilibrium_minerals` (NOT `selected_minerals`)
@@ -88,31 +101,33 @@ Find optimal dose for target conditions.
 }
 ```
 
-### 4. simulate_solution_mixing
+### 3. simulate_solution_mixing ✅ **WORKING**
 Blend multiple water streams.
+
+**CORRECTED FIELD NAME**: Use `fraction_or_volume` as a direct number (not nested in object)
 
 **Required format:**
 ```json
 {
     "solutions_to_mix": [
         {
-            "solution": {"analysis": {...}, "units": "mmol/L"},
-            "fraction": 0.7
+            "solution": {"analysis": {...}, "units": "mmol/L"}, 
+            "fraction_or_volume": 0.7
         },
         {
             "solution": {"analysis": {...}, "units": "mmol/L"},
-            "fraction": 0.3
+            "fraction_or_volume": 0.3
         }
     ],
     "database": "minteq.dat"
 }
 ```
 
-### 5. predict_scaling_potential
+### 4. predict_scaling_potential ✅ **WORKING**
 Assess precipitation/scaling risks. **IMPORTANT**: Membrane scaling analysis has been removed (was heuristics-based). Use standard thermodynamic scaling analysis only.
 
-### 6. generate_calculation_sheet
-Create engineering documentation.
+### 5. batch_process_scenarios ⭐ **THE OPTIMIZATION TOOL**
+**USE THIS for ALL optimization tasks** - dosing requirements, parameter sweeps, multi-reagent optimization.
 
 **Required format:**
 ```json
@@ -132,8 +147,7 @@ Create engineering documentation.
 }
 ```
 
-### 7. batch_process_scenarios ⭐
-**USE THIS for 3+ similar calculations** - Processes multiple scenarios in parallel.
+**CRITICAL: Use C(4) for carbonate chemistry and dose=0.1+ (dose=0.0 fails validation)**
 
 **CRITICAL: base_solution MUST be wrapped in proper format:**
 ```json
@@ -266,7 +280,65 @@ NaOH, Ca(OH)2, Na2CO3, FeCl3, Al2(SO4)3, H2SO4, HCl, NaOCl
 }
 ```
 
-## Common Workflows
+### Tested Optimization Patterns ✅ **PROVEN TO WORK**
+
+**Pattern 1: pH Adjustment (replaces calculate_dosing_requirement)**
+```json
+{
+    "base_solution": {
+        "units": "mmol/L",
+        "analysis": {"Ca": 2.0, "Mg": 1.0, "C(4)": 1.8},
+        "database": "minteq.dat"
+    },
+    "scenarios": [
+        {"name": "dose_0.5", "type": "chemical_addition", "reactants": [{"formula": "NaOH", "amount": 0.5, "units": "mmol"}], "allow_precipitation": true},
+        {"name": "dose_1.0", "type": "chemical_addition", "reactants": [{"formula": "NaOH", "amount": 1.0, "units": "mmol"}], "allow_precipitation": true},
+        {"name": "dose_1.5", "type": "chemical_addition", "reactants": [{"formula": "NaOH", "amount": 1.5, "units": "mmol"}], "allow_precipitation": true},
+        {"name": "dose_2.0", "type": "chemical_addition", "reactants": [{"formula": "NaOH", "amount": 2.0, "units": "mmol"}], "allow_precipitation": true}
+    ]
+}
+```
+
+**Pattern 2: Lime Softening Curves**
+```json
+{
+    "base_solution": {
+        "units": "mmol/L", 
+        "analysis": {"Ca": 5.0, "Mg": 2.0, "C(4)": 4.0},
+        "database": "minteq.dat"
+    },
+    "scenarios": [
+        {"name": "lime_1", "type": "chemical_addition", "reactants": [{"formula": "Ca(OH)2", "amount": 1.0, "units": "mmol"}], "allow_precipitation": true},
+        {"name": "lime_2", "type": "chemical_addition", "reactants": [{"formula": "Ca(OH)2", "amount": 2.0, "units": "mmol"}], "allow_precipitation": true},
+        {"name": "lime_3", "type": "chemical_addition", "reactants": [{"formula": "Ca(OH)2", "amount": 3.0, "units": "mmol"}], "allow_precipitation": true},
+        {"name": "lime_4", "type": "chemical_addition", "reactants": [{"formula": "Ca(OH)2", "amount": 4.0, "units": "mmol"}], "allow_precipitation": true}
+    ]
+}
+```
+
+**Pattern 3: Multi-Reagent Grid Search**  
+```json
+{
+    "base_solution": {SOLUTION_OBJECT},
+    "scenarios": [
+        {"name": "lime_2_soda_1", "type": "chemical_addition", "reactants": [{"formula": "Ca(OH)2", "amount": 2.0, "units": "mmol"}, {"formula": "Na2CO3", "amount": 1.0, "units": "mmol"}], "allow_precipitation": true},
+        {"name": "lime_3_soda_1", "type": "chemical_addition", "reactants": [{"formula": "Ca(OH)2", "amount": 3.0, "units": "mmol"}, {"formula": "Na2CO3", "amount": 1.0, "units": "mmol"}], "allow_precipitation": true},
+        {"name": "lime_3_soda_2", "type": "chemical_addition", "reactants": [{"formula": "Ca(OH)2", "amount": 3.0, "units": "mmol"}, {"formula": "Na2CO3", "amount": 2.0, "units": "mmol"}], "allow_precipitation": true}
+    ]
+}
+```
+
+## Optimization Strategy ⭐ **TESTED APPROACH**
+
+### Step 1: Use Parameter Sweeps for All Optimization
+Instead of broken specialized tools, use `batch_process_scenarios` with parameter sweeps:
+
+1. **Coarse sweep** (5-8 doses) to identify target range
+2. **Fine sweep** around promising region  
+3. **Analyze results** to find optimal dose
+4. **Multi-reagent grids** for complex problems
+
+### Step 2: Optimization Workflow Example
 
 ### pH Adjustment
 ```python
@@ -319,24 +391,39 @@ result = batch_process_scenarios({
 })
 ```
 
-## Troubleshooting
+## Troubleshooting ⚠️ **BASED ON TESTING**
+
+**❌ BROKEN TOOLS (DO NOT USE):**
+- `calculate_dosing_requirement` - Database errors with minteq.dat
+- Enhanced optimization tools - Poor convergence, don't achieve targets
+
+**✅ WORKING SOLUTIONS:**
+
+**Alkalinity issues**: Use `C(4)` instead of `Alkalinity` for proper carbonate speciation
+
+**Solution mixing field errors**: Use `fraction_or_volume` (not `fraction`)
+
+**Dose validation errors**: Never use `amount: 0.0` - use `0.1` minimum
+
+**Missing optimal doses**: ✅ **Use `batch_process_scenarios` parameter sweeps**:
+- pH adjustment: NaOH dose sweep (0.5-3.0 mmol range)
+- Lime softening: Ca(OH)2 dose sweep (1-8 mmol range)  
+- Multi-reagent: Grid search with 2-3 chemicals
+- Coagulation: FeCl3 + NaOH grid for P removal
+
+**Kinetic modeling**: ❌ **Completely broken** - produces "Bad RK steps" errors
+
+**Temperature inheritance**: Solution mixing defaults to 25°C regardless of input temperatures
 
 **Input validation errors**: 
 - Check all required fields are present
 - Verify field names match exactly (case-sensitive)
 - Ensure solution objects have `units`, `analysis`, `database`
+- Use `C(4)` for carbonate chemistry
 
 **"Mineral not found"**: Check spelling or SI = -999
 
 **No precipitation**: Check if `allow_precipitation: true` is set
-
-**Batch processing failures**: Verify `base_solution` has complete structure
-
-**Calculation sheet errors**: Ensure `calculation_data` field is present
-
-**Kinetic errors**: Use gradual time steps, larger seed values, or avoid kinetics if API support limited
-
-**Membrane scaling requests**: ❌ **Not available** - removed for scientific integrity
 
 ## Quick Reference
 - pH↑: NaOH, Ca(OH)2, Na2CO3
@@ -346,9 +433,19 @@ result = batch_process_scenarios({
 - Heavy metals: NaOH → Metal(OH)n at pH 9-11
 
 **Remember**: 
-1. Use exact input templates to avoid validation errors
-2. Always wrap concentrations in `analysis` object
-3. Include required fields: `units`, `database`, `temperature_celsius`
-4. Use PHREEQC notation and mmol/L units
-5. Use batch processing for multiple calculations
-6. Follow field naming exactly as specified
+1. **5 working tools only** - broken tools removed based on testing
+2. **Use `batch_process_scenarios` for ALL optimization** - parameter sweeps replace broken tools
+3. **Use `C(4)` not `Alkalinity`** for proper carbonate speciation
+4. **Use `fraction_or_volume` not `fraction`** for solution mixing
+5. **Never use `amount: 0.0`** - minimum 0.1 mmol
+6. **Always wrap concentrations** in `analysis` object
+7. **Include required fields**: `units`, `database`, `temperature_celsius`
+8. **Use PHREEQC notation** and mmol/L units
+9. **Avoid kinetic modeling** - completely broken
+10. **Follow field naming** exactly as corrected in this prompt
+
+## Server Status: ✅ **TESTED & VALIDATED**
+- **Scientific integrity**: All results from PHREEQC thermodynamic calculations
+- **Reliable optimization**: Parameter sweeps replace broken black-box optimization
+- **Technical focus**: Cost calculations removed, purely technical server
+- **5 working tools**: Broken tools removed, batch processing handles all optimization

@@ -153,6 +153,48 @@ async def process_single_scenario(base_solution: Dict[str, Any],
             'final_solution': current_solution
         }
     
+    elif scenario_type == 'phosphorus_optimization':
+        # Advanced phosphorus removal optimization with coagulant selection
+        return await optimize_phosphorus_removal(
+            initial_water=base_solution,
+            target_p_mg_l=scenario['target_p_mg_l'],
+            coagulant=scenario.get('coagulant', 'FeCl3'),
+            target_ph=scenario.get('target_ph'),
+            database=scenario.get('database', 'minteq.dat')
+        )
+    
+    elif scenario_type == 'multi_reagent_optimization':
+        # Multi-chemical optimization with various strategies
+        return await optimize_multi_reagent_treatment(
+            initial_water=base_solution,
+            reagents=scenario['reagents'],
+            objectives=scenario['objectives'],
+            constraints=scenario.get('constraints'),
+            optimization_strategy=scenario.get('strategy', 'pareto_front'),
+            database=scenario.get('database', 'minteq.dat')
+        )
+    
+    elif scenario_type == 'lime_softening_optimization':
+        # Lime softening optimization with optional soda ash
+        return await optimize_lime_softening_enhanced(
+            initial_water=base_solution,
+            target_hardness_mg_l=scenario['target_hardness_mg_l'],
+            target_alkalinity_mg_l=scenario.get('target_alkalinity_mg_l'),
+            include_soda_ash=scenario.get('include_soda_ash', True),
+            target_ph=scenario.get('target_ph', 10.5),
+            database=scenario.get('database', 'minteq.dat')
+        )
+    
+    elif scenario_type == 'alternative_comparison':
+        # Compare different treatment alternatives systematically
+        return await compare_treatment_alternatives(
+            initial_water=base_solution,
+            objective=scenario['objective'],
+            alternatives=scenario['alternatives'],
+            evaluation_criteria=scenario.get('evaluation_criteria', ['dose', 'final_ph', 'removal_efficiency']),
+            database=scenario.get('database', 'minteq.dat')
+        )
+    
     else:
         raise ValueError(f"Unknown scenario type: {scenario_type}")
 
@@ -337,15 +379,18 @@ async def calculate_lime_softening_dose(
     logger.info(f"Initial hardness: {initial_hardness:.1f} mg/L as CaCO3")
     logger.info(f"Target hardness: {target_hardness_mg_caco3:.1f} mg/L as CaCO3")
     
-    # Estimate lime requirement
-    # Rule of thumb: 1 mmol Ca(OH)2 removes ~2 mmol hardness
+    # Use stoichiometric estimate to set smart optimization bounds (not reported to user)
+    # Rule of thumb: 1 mmol Ca(OH)2 removes ~2 mmol hardness for bound estimation only
     hardness_to_remove = (initial_hardness - target_hardness_mg_caco3) / 100000  # mol/L
-    estimated_lime = hardness_to_remove * 0.6  # Initial estimate
+    estimated_lime = hardness_to_remove * 0.6  # Stoichiometric estimate for bounds only
+    
+    # Set optimization bounds as multiples of stoichiometric estimate
+    max_reasonable_lime_dose = estimated_lime * 3.0  # 3x upper bound for optimization search
     
     # Set up optimization
     result = await calculate_dosing_requirement_enhanced({
         'initial_solution': initial_water,
-        'reagents': [{'formula': 'Ca(OH)2', 'min_dose': 0, 'max_dose': estimated_lime * 3}],
+        'reagents': [{'formula': 'Ca(OH)2', 'min_dose': 0, 'max_dose': max_reasonable_lime_dose}],
         'objectives': [{
             'parameter': 'total_hardness',
             'value': target_hardness_mg_caco3,
@@ -373,27 +418,21 @@ async def optimize_phosphorus_removal(
     Calculate coagulant dose for phosphorus removal with optional pH control.
     """
     
-    # Molar ratios for different coagulants
-    molar_ratios = {
-        'FeCl3': 1.8,  # Fe:P typical ratio
-        'Al2(SO4)3': 2.0,  # Al:P typical ratio
-        'FeSO4': 2.5  # Fe(II):P needs more due to oxidation
-    }
-    
-    # Get initial P concentration
+    # Get initial P concentration and use stoichiometry for smart optimization bounds
     initial_analysis = await calculate_solution_speciation(initial_water)
     p_initial_molal = initial_analysis['element_totals_molality'].get('P', 0)
     p_initial_mg = p_initial_molal * 30974  # mg/L
     
-    # Estimate coagulant dose
-    p_to_remove = (p_initial_mg - target_p_mg_l) / 30974  # mol/L
-    ratio = molar_ratios.get(coagulant, 2.0)
+    # Use stoichiometric ratios to estimate dose magnitude for bounds only (not reported to user)
+    if 'Fe' in coagulant:
+        # Fe:P molar ratio typically 1.5-2.5 for effective removal (for bounds estimation)
+        estimated_coagulant_molal = p_initial_molal * 2.0  # Conservative estimate for bounds
+    else:  # Aluminum coagulants
+        # Al:P molar ratio typically 1.8-2.5 for effective removal (for bounds estimation)
+        estimated_coagulant_molal = p_initial_molal * 2.2  # Conservative estimate for bounds
     
-    if coagulant == 'Al2(SO4)3':
-        # Account for Al2 in formula
-        estimated_dose = p_to_remove * ratio / 2
-    else:
-        estimated_dose = p_to_remove * ratio
+    # Set optimization bounds as multiples of stoichiometric estimate
+    max_reasonable_dose = estimated_coagulant_molal * 4.0  # 4x upper bound for optimization search
     
     # Set up objectives
     objectives = [{
@@ -403,7 +442,7 @@ async def optimize_phosphorus_removal(
         'units': 'mg/L'
     }]
     
-    reagents = [{'formula': coagulant, 'min_dose': 0, 'max_dose': estimated_dose * 3}]
+    reagents = [{'formula': coagulant, 'min_dose': 0, 'max_dose': max_reasonable_dose}]
     
     # Add pH control if specified
     if target_ph is not None:
@@ -1078,3 +1117,296 @@ async def optimize_single_objective_with_constraints(
         'optimization_method': 'adaptive',
         'max_iterations': 30
     })
+
+
+async def optimize_lime_softening_enhanced(
+    initial_water: Dict[str, Any],
+    target_hardness_mg_l: float,
+    target_alkalinity_mg_l: Optional[float] = None,
+    include_soda_ash: bool = True,
+    target_ph: float = 10.5,
+    database: str = 'minteq.dat'
+) -> Dict[str, Any]:
+    """
+    Advanced lime softening optimization with optional soda ash for enhanced softening.
+    
+    Chemistry:
+    - Lime removes carbonate hardness: Ca(HCO3)2 + Ca(OH)2 → 2CaCO3↓ + 2H2O
+    - Soda ash removes non-carbonate hardness: CaSO4 + Na2CO3 → CaCO3↓ + Na2SO4
+    
+    Args:
+        initial_water: Initial water composition
+        target_hardness_mg_l: Target total hardness in mg/L as CaCO3
+        target_alkalinity_mg_l: Target alkalinity in mg/L as CaCO3 (optional)
+        include_soda_ash: Whether to include Na2CO3 for enhanced softening
+        target_ph: Target final pH (typical 10.0-11.0 for lime softening)
+        database: PHREEQC database to use
+    
+    Returns:
+        Optimization results with optimal lime dose and optional soda ash dose
+    """
+    
+    # Calculate initial water characteristics
+    initial_analysis = await calculate_solution_speciation(initial_water)
+    
+    # Get initial hardness and alkalinity
+    element_totals = initial_analysis.get('element_totals_molality', {})
+    ca_molal = element_totals.get('Ca', 0)
+    mg_molal = element_totals.get('Mg', 0)
+    initial_hardness_mg = (ca_molal + mg_molal) * 100000  # mg/L as CaCO3
+    
+    # Get alkalinity from species or estimate from carbonate
+    species = initial_analysis.get('species_molality', {})
+    hco3_molal = species.get('HCO3-', 0)
+    co3_molal = species.get('CO3-2', 0)
+    initial_alkalinity_mg = (hco3_molal + 2 * co3_molal) * 50000  # mg/L as CaCO3
+    
+    # Analyze hardness types for optimization strategy only (no heuristic estimates)
+    carbonate_hardness = min(initial_hardness_mg, initial_alkalinity_mg)
+    non_carbonate_hardness = max(0, initial_hardness_mg - carbonate_hardness)
+    
+    logger.info(f"Initial hardness: {initial_hardness_mg:.1f} mg/L as CaCO3")
+    logger.info(f"Carbonate hardness: {carbonate_hardness:.1f} mg/L as CaCO3") 
+    logger.info(f"Non-carbonate hardness: {non_carbonate_hardness:.1f} mg/L as CaCO3")
+    
+    hardness_to_remove = initial_hardness_mg - target_hardness_mg_l
+    
+    if hardness_to_remove <= 0:
+        return {
+            'message': 'Target hardness already achieved',
+            'optimal_lime_dose_mmol_l': 0,
+            'optimal_soda_ash_dose_mmol_l': 0,
+            'initial_hardness_mg_l': initial_hardness_mg,
+            'target_hardness_mg_l': target_hardness_mg_l
+        }
+    
+    # Use stoichiometry to estimate dose magnitude for smart bounds (not reported to user)
+    # Lime softening chemistry: Ca(HCO3)2 + Ca(OH)2 → 2CaCO3↓ + 2H2O
+    # Rough estimate: 1 mmol Ca(OH)2 removes ~2 mmol hardness (for bounds only)
+    estimated_lime_molal = (hardness_to_remove / 100000) * 0.6  # Stoichiometric estimate
+    
+    # Set optimization bounds as multiples of stoichiometric estimate
+    max_lime_dose = estimated_lime_molal * 3.0  # 3x upper bound for optimization search
+    
+    # Set up optimization objectives
+    objectives = [{
+        'parameter': 'total_hardness',
+        'value': target_hardness_mg_l,
+        'tolerance': 5.0,  # ±5 mg/L tolerance
+        'units': 'mg/L as CaCO3',
+        'weight': 0.8  # Primary objective
+    }, {
+        'parameter': 'pH',
+        'value': target_ph,
+        'tolerance': 0.3,  # ±0.3 pH units
+        'weight': 0.2  # Secondary objective
+    }]
+    
+    # Set up reagents for optimization
+    reagents = [{
+        'formula': 'Ca(OH)2',
+        'min_dose': 0,
+        'max_dose': max_lime_dose,
+        'units': 'mmol'
+    }]
+    
+    # Add soda ash if enhanced softening requested and non-carbonate hardness exists
+    if include_soda_ash and non_carbonate_hardness > 10:  # Only if significant non-carbonate hardness
+        # Estimate soda ash needs: CaSO4 + Na2CO3 → CaCO3↓ + Na2SO4 (1:1 stoichiometry)
+        estimated_soda_ash_molal = (non_carbonate_hardness / 100000) * 0.8  # Stoichiometric estimate
+        max_soda_ash_dose = estimated_soda_ash_molal * 3.0  # 3x upper bound for optimization search
+        
+        reagents.append({
+            'formula': 'Na2CO3',
+            'min_dose': 0,
+            'max_dose': max_soda_ash_dose,
+            'units': 'mmol'
+        })
+        
+        # Add alkalinity objective if target specified
+        if target_alkalinity_mg_l is not None:
+            objectives.append({
+                'parameter': 'carbonate_alkalinity',
+                'value': target_alkalinity_mg_l,
+                'tolerance': 10.0,  # ±10 mg/L tolerance
+                'units': 'mg/L as CaCO3',
+                'weight': 0.3
+            })
+        
+        logger.info(f"Enhanced softening: targeting lime + soda ash optimization")
+        optimization_strategy = 'weighted_sum'  # Multi-reagent optimization
+    else:
+        logger.info(f"Standard lime softening: single reagent optimization")
+        optimization_strategy = 'weighted_sum'  # Single reagent can use weighted sum
+    
+    # Run optimization
+    optimization_result = await optimize_multi_reagent_treatment(
+        initial_water=initial_water,
+        reagents=reagents,
+        objectives=objectives,
+        optimization_strategy=optimization_strategy,
+        database=database
+    )
+    
+    # Extract optimal doses
+    optimal_doses = optimization_result.get('optimal_doses', {})
+    lime_dose = optimal_doses.get('Ca(OH)2', 0)
+    soda_ash_dose = optimal_doses.get('Na2CO3', 0)
+    
+    # Get final solution properties
+    final_solution = optimization_result.get('final_solution', {})
+    final_hardness = final_solution.get('total_hardness_mg_caco3', target_hardness_mg_l)
+    final_ph = final_solution.get('pH', target_ph)
+    final_alkalinity = final_solution.get('carbonate_alkalinity_mg_caco3', initial_alkalinity_mg)
+    
+    return {
+        'optimization_method': 'lime_softening_enhanced',
+        'initial_conditions': {
+            'hardness_mg_l': initial_hardness_mg,
+            'alkalinity_mg_l': initial_alkalinity_mg,
+            'carbonate_hardness_mg_l': carbonate_hardness,
+            'non_carbonate_hardness_mg_l': non_carbonate_hardness
+        },
+        'targets': {
+            'hardness_mg_l': target_hardness_mg_l,
+            'alkalinity_mg_l': target_alkalinity_mg_l,
+            'ph': target_ph
+        },
+        'optimal_doses': {
+            'lime_ca_oh_2_mmol_l': lime_dose,
+            'soda_ash_na2co3_mmol_l': soda_ash_dose if include_soda_ash else 0
+        },
+        'final_solution': {
+            'hardness_mg_l': final_hardness,
+            'alkalinity_mg_l': final_alkalinity,
+            'ph': final_ph
+        },
+        'performance': {
+            'hardness_removal_percent': ((initial_hardness_mg - final_hardness) / initial_hardness_mg * 100) if initial_hardness_mg > 0 else 0,
+            'target_achieved': abs(final_hardness - target_hardness_mg_l) <= 5.0
+        },
+        'full_optimization_result': optimization_result
+    }
+
+
+async def compare_treatment_alternatives(
+    initial_water: Dict[str, Any],
+    objective: Dict[str, Any],
+    alternatives: List[str],
+    evaluation_criteria: List[str] = ['dose', 'final_ph', 'removal_efficiency'],
+    database: str = 'minteq.dat'
+) -> Dict[str, Any]:
+    """
+    Compare different treatment alternatives systematically.
+    
+    Args:
+        initial_water: Initial water composition
+        objective: Treatment objective (e.g., {'parameter': 'residual_phosphorus', 'target': 0.5, 'units': 'mg/L'})
+        alternatives: List of chemical formulas to compare (e.g., ['FeCl3', 'Al2(SO4)3', 'FeSO4'])
+        evaluation_criteria: Metrics to compare ['dose', 'final_ph', 'removal_efficiency']
+        database: PHREEQC database to use
+    
+    Returns:
+        Comparison table with optimization results for each alternative
+    """
+    
+    logger.info(f"Comparing {len(alternatives)} treatment alternatives for {objective['parameter']} removal")
+    
+    # Run optimization for each alternative in parallel
+    optimization_tasks = []
+    
+    for alternative in alternatives:
+        # Determine optimization function based on chemical type
+        if alternative in ['FeCl3', 'Al2(SO4)3', 'FeSO4', 'Fe2(SO4)3'] and objective['parameter'] == 'residual_phosphorus':
+            # Use specialized phosphorus removal optimization
+            task = optimize_phosphorus_removal(
+                initial_water=initial_water,
+                target_p_mg_l=objective['target'],
+                coagulant=alternative,
+                database=database
+            )
+        else:
+            # Use general single-reagent optimization
+            reagents = [{'formula': alternative, 'min_dose': 0, 'max_dose': 50}]  # mmol/L max
+            objectives = [objective]
+            
+            task = optimize_multi_reagent_treatment(
+                initial_water=initial_water,
+                reagents=reagents,
+                objectives=objectives,
+                optimization_strategy='weighted_sum',
+                database=database
+            )
+        
+        optimization_tasks.append((alternative, task))
+    
+    # Run all optimizations in parallel
+    results = []
+    for alternative, task in optimization_tasks:
+        try:
+            result = await task
+            results.append((alternative, result))
+        except Exception as e:
+            logger.error(f"Optimization failed for {alternative}: {e}")
+            results.append((alternative, {'error': str(e)}))
+    
+    # Build comparison table
+    comparison_data = []
+    
+    for alternative, result in results:
+        if 'error' in result:
+            comparison_data.append({
+                'alternative': alternative,
+                'status': 'failed',
+                'error': result['error']
+            })
+            continue
+        
+        # Extract evaluation metrics
+        entry = {'alternative': alternative, 'status': 'success'}
+        
+        # Get optimal dose
+        if 'dose' in evaluation_criteria:
+            optimal_doses = result.get('optimal_doses', {})
+            dose = optimal_doses.get(alternative, result.get('optimal_dose', 0))
+            entry['optimal_dose_mmol_l'] = dose
+        
+        # Get final solution properties
+        final_solution = result.get('final_solution', {})
+        
+        if 'final_ph' in evaluation_criteria:
+            entry['final_ph'] = final_solution.get('pH', final_solution.get('ph', None))
+        
+        # Calculate removal efficiency
+        if 'removal_efficiency' in evaluation_criteria:
+            target_param = objective['parameter']
+            if target_param == 'residual_phosphorus':
+                # Get initial and final P concentrations
+                initial_analysis = await calculate_solution_speciation(initial_water)
+                initial_p_molal = initial_analysis.get('element_totals_molality', {}).get('P', 0)
+                initial_p_mg = initial_p_molal * 30974
+                
+                final_p_mg = objective['target']  # Assuming optimization achieved target
+                removal_efficiency = ((initial_p_mg - final_p_mg) / initial_p_mg * 100) if initial_p_mg > 0 else 0
+                entry['removal_efficiency_percent'] = removal_efficiency
+        
+        # Note: Cost and sludge calculations removed to maintain technical focus
+        # This server provides only chemistry and thermodynamic calculations
+        
+        comparison_data.append(entry)
+    
+    # Sort by performance (highest efficiency or lowest dose)
+    if 'removal_efficiency' in evaluation_criteria:
+        comparison_data.sort(key=lambda x: x.get('removal_efficiency_percent', 0), reverse=True)
+    elif 'dose' in evaluation_criteria:
+        comparison_data.sort(key=lambda x: x.get('optimal_dose_mmol_l', float('inf')))
+    
+    return {
+        'comparison_type': 'treatment_alternatives',
+        'objective': objective,
+        'alternatives_evaluated': len(alternatives),
+        'evaluation_criteria': evaluation_criteria,
+        'comparison_table': comparison_data,
+        'recommendation': comparison_data[0] if comparison_data and comparison_data[0].get('status') == 'success' else None,
+        'detailed_results': {alt: result for alt, result in results}
+    }

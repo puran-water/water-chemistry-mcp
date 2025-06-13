@@ -2033,49 +2033,40 @@ async def find_reactant_dose_for_target(
                 f"{' for ' + mineral_name if mineral_name else ''}"
                 f"{' for ' + element_or_species if element_or_species else ''}")
     
-    # For logging/debugging - calculate a rough estimate of expected final dose for pH
+    # Use chemical heuristics to set smart optimization bounds (not reported to user)
+    # Final answer will always come from PHREEQC, but bounds should be intelligent
     if target_parameter == 'pH':
         try:
-            # Get initial pH from solution block to make a rough estimate of required dose
+            # Get initial pH to estimate required dose magnitude for bounds only
             initial_ph_match = re.search(r'pH\s+(\d+\.?\d*)', initial_solution_str, re.IGNORECASE)
             if initial_ph_match:
                 initial_ph = float(initial_ph_match.group(1))
                 ph_change = abs(target_value - initial_ph)
                 
-                # Make rough estimate of dose for log planning purposes
+                # Estimate dose magnitude for bounds only (not reported to user)
                 if ph_change > 0:
                     if reagent_formula in ['NaOH', 'KOH', 'Ca(OH)2']:
-                        # For bases, each unit pH increase requires 10x more OH-
-                        rough_dose = 10**(ph_change) - 1 if target_value > initial_ph else 0
+                        # For bases, estimate dose magnitude for bounds
+                        rough_dose = ph_change * 2 if ph_change > 0.05 else 0.1  # Handle small changes
                     elif reagent_formula in ['HCl', 'H2SO4', 'HNO3']:
-                        # For acids, each unit pH decrease requires 10x more H+
-                        rough_dose = 10**(ph_change) - 1 if target_value < initial_ph else 0
+                        # For acids, estimate dose magnitude for bounds
+                        rough_dose = ph_change * 2 if ph_change > 0.05 else 0.1  # Handle small changes
                     else:
-                        rough_dose = ph_change * 5  # Generic fallback
+                        rough_dose = ph_change * 5  # Generic fallback for bounds
                         
-                    logger.info(f"Rough estimate of required dose based on pH change: ~{rough_dose:.4f} mmol")
-                    
-                    # Set a more appropriate upper bound based on pH change
+                    # Set smart upper bound as multiple of estimated magnitude
                     if upper_bound_mmol is None:
-                        if ph_change > 3:
-                            upper_bound_mmol = max(initial_guess_mmol * 100, 1000)
-                        elif ph_change > 2:
-                            upper_bound_mmol = max(initial_guess_mmol * 50, 100)
-                        elif ph_change > 1:
-                            upper_bound_mmol = max(initial_guess_mmol * 20, 10)
-                        else:
-                            upper_bound_mmol = max(initial_guess_mmol * 10, 1)
+                        upper_bound_mmol = rough_dose * 5.0  # 5x upper bound for optimization search
                         
                         # Ensure our initial guess is in the range
                         if current_dose_mmol >= upper_bound_mmol:
-                            current_dose_mmol = upper_bound_mmol / 2
-                            logger.info(f"Adjusted initial guess to {current_dose_mmol:.4f} mmol to fit within bounds")
+                            current_dose_mmol = upper_bound_mmol / 10  # Start conservative
         except Exception as e:
-            logger.warning(f"Error estimating rough dose from pH change: {e}")
+            logger.debug(f"Could not estimate bounds from pH change: {e}")
     
-    # If upper bound wasn't set from pH estimate, use a default
+    # If upper bound wasn't set from heuristics, use multiple of initial guess
     if upper_bound_mmol is None:
-        upper_bound_mmol = max(initial_guess_mmol * 100, 10.0)
+        upper_bound_mmol = initial_guess_mmol * 50  # Fallback: 50x initial guess
         
     # Make sure our starting bounds are valid
     if current_dose_mmol <= lower_bound_mmol:

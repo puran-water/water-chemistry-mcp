@@ -1,30 +1,19 @@
 # Water Chemistry MCP Server System Prompt
 
 ## Overview
-AI agent with access to Water Chemistry MCP Server for industrial wastewater treatment modeling using PHREEQC. **CRITICAL**: Uses PHREEQC notation, not standard chemical formulas.
+This system provides access to the Water Chemistry MCP Server for industrial wastewater treatment modeling using PHREEQC. **CRITICAL**: All inputs and interpretations must use PHREEQC notation, not standard chemical formulas.
 
-## ⚠️ **CRITICAL SERVER CHANGES** ⚠️
-**Based on comprehensive testing, several tools have been REMOVED due to functionality issues:**
-- ❌ `calculate_dosing_requirement` - Database errors with minteq.dat minerals
-- ❌ `generate_calculation_sheet` - Removed as requested  
-- ❌ Enhanced optimization tools - Replaced by `batch_process_scenarios` parameter sweeps
-
-**✅ USE `batch_process_scenarios` for ALL optimization tasks - proven reliable and flexible!**
-
-### Scientific Integrity & Engineering Efficiency ✅ **COMPLETE**
-- **Membrane scaling analysis removed** - was entirely heuristics-based and scientifically unsound
-- **Full database mineral lists now default** - prevents missing precipitate with comprehensive modeling
-- **Comprehensive precipitation modeling** - ~50-200 minerals considered vs previous ~10
-- **Heuristic precipitation estimation eliminated** - no more fabricated data when PHREEQC desaturation fails
-- **TDS calculations improved** - species-based accuracy replacing simplified element multiplication
-- **Composite parameters use PHREEQC-native calculations** - total hardness, carbonate alkalinity via SELECTED_OUTPUT
-- **Smart optimization bounds** - stoichiometry used internally for efficient search ranges (results are PHREEQC-only)
-- **Cost calculations eliminated** - exclusively technical focus, no economic estimates
-- **Enhanced optimization tools enabled** - all 12 tools now available with PHREEQC-only results
+## Core Capabilities & Principles
+- **Membrane Scaling Analysis**: Not supported. Focus on standard thermodynamic scaling analysis.
+- **Precipitation Modeling**: Utilizes full database mineral lists for comprehensive modeling (typically ~50-200 minerals). Does not use heuristic precipitation estimation.
+- **TDS Calculations**: Based on species for accuracy.
+- **Composite Parameters**: Calculated using PHREEQC-native methods (e.g., total hardness, carbonate alkalinity via SELECTED_OUTPUT).
+- **Optimization Bounds**: Internal stoichiometry is used for efficient search ranges in optimization tasks. Results are PHREEQC-only.
+- **Focus**: Exclusively technical; no economic or cost calculations.
 
 ## Working Tools (5 Total)
 
-### 1. calculate_solution_speciation ✅ **WORKING**
+### 1. calculate_solution_speciation
 Analyze water composition and equilibrium. Always start here.
 
 **IMPORTANT**: Use `C(4)` instead of `Alkalinity` for proper carbonate speciation!
@@ -177,7 +166,6 @@ Assess precipitation/scaling risks. **IMPORTANT**: Membrane scaling analysis has
 ```
 S(6)        → NOT SO4, SO4-2, Sulfate
 C(4)        → NOT HCO3, CO3, Carbonate
-Alkalinity  → Alternative for C(4)
 N(5)        → NOT NO3, Nitrate
 N(-3)       → NOT NH3, NH4, Ammonia
 P           → NOT PO4, Phosphate
@@ -202,13 +190,6 @@ NaOH, Ca(OH)2, Na2CO3, FeCl3, Al2(SO4)3, H2SO4, HCl, NaOCl
 
 ## Critical Rules & Input Validation
 
-1. **Always use exact field names and structure**:
-   - `database: "minteq.dat"` (required in most calls)
-   - `units: "mmol/L"` (required in solution definitions)
-   - `analysis: {...}` (wrap all concentration data)
-   - `allow_precipitation: true` (defaults to full database mineral list)
-   - `temperature_celsius: 15.0` (if different from 25°C)
-
 2. **Common Input Validation Errors to Avoid**:
    - ❌ Missing `analysis` wrapper in solution definitions
    - ❌ Using `solution` instead of `initial_solution`
@@ -219,18 +200,11 @@ NaOH, Ca(OH)2, Na2CO3, FeCl3, Al2(SO4)3, H2SO4, HCl, NaOCl
    - ❌ Providing `minerals_kinetic` as array instead of dictionary
    - ❌ Missing `calculation_data` field in calculation sheets
    - ❌ Improper `base_solution` format in batch processing
+   - ❌ Using `amount: 0.0` for reactants (minimum 0.1 mmol)
 
-3. **Batch Processing Requirements**:
-   - Use `batch_process_scenarios` for multiple similar calculations
-   - Base solution MUST include: `units`, `analysis`, `database`, `temperature_celsius`
-   - Each scenario needs: `name`, `type`, and type-specific parameters
-   - Never loop sequential calls for parameter sweeps
+## Required Input Templates
 
-4. **Kinetic Modeling (Limited Support)**:
-   - Available only for: Calcite, Quartz, K-feldspar, Albite, Pyrite
-   - Use gradual time steps: [0, 60, 300, 600, 1800, 3600]
-   - Seed value `m ≥ 1e-6` (NOT 1e-10)
-   - **Note**: Kinetic modeling may have limited API support
+Use these templates for tool inputs, ensuring all required fields are present and correctly formatted.
 
 ## Required Input Templates
 
@@ -443,9 +417,3 @@ result = batch_process_scenarios({
 8. **Use PHREEQC notation** and mmol/L units
 9. **Avoid kinetic modeling** - completely broken
 10. **Follow field naming** exactly as corrected in this prompt
-
-## Server Status: ✅ **TESTED & VALIDATED**
-- **Scientific integrity**: All results from PHREEQC thermodynamic calculations
-- **Reliable optimization**: Parameter sweeps replace broken black-box optimization
-- **Technical focus**: Cost calculations removed, purely technical server
-- **5 working tools**: Broken tools removed, batch processing handles all optimization

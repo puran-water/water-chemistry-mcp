@@ -10,15 +10,18 @@ Advanced water chemistry modeling MCP server powered by PHREEQC, designed for in
 
 ## Features
 
-### Core Water Chemistry Tools
+### Core Water Chemistry Tools (5 Working Tools)
 
 1. **Solution Speciation** - Complete water quality analysis including pH, ionic strength, saturation indices, and species distribution
-2. **Chemical Addition** - Simulate treatment processes with chemical dosing and equilibrium calculations
-3. **Dosing Requirement** - Calculate optimal chemical doses using advanced convergence algorithms
-4. **Solution Mixing** - Analyze blending of multiple water streams with precipitation modeling
-5. **Scaling Potential** - Predict mineral scaling risks for membrane systems (RO/NF)
-6. **Kinetic Modeling** - Time-dependent precipitation and dissolution kinetics
-7. **Engineering Calculation Sheets** - Professional documentation generation
+2. **Chemical Addition** - Simulate treatment processes with chemical dosing and precipitation modeling
+3. **Solution Mixing** - Analyze blending of multiple water streams with precipitation modeling
+4. **Scaling Potential** - Predict mineral scaling risks using thermodynamic calculations
+5. **Batch Processing** - Parameter sweeps, optimization, and parallel scenario evaluation
+
+### Removed Tools (Based on Testing)
+- **Dosing Requirement** - Removed due to database compatibility issues
+- **Engineering Calculation Sheets** - Removed as requested
+- **Enhanced Optimization Tools** - Replaced by batch_process_scenarios
 
 ### Advanced Capabilities
 
@@ -47,80 +50,67 @@ python server.py
 ### Example Usage
 
 ```python
+# MCP Server usage - 5 working tools available
 from tools.chemical_addition import simulate_chemical_addition
-from tools.schemas import ChemicalAdditionInput, InitialSolution, ChemicalReactant
 
 # Simulate lime softening
-input_data = ChemicalAdditionInput(
-    database="minteq.dat",
-    reactants=[
-        ChemicalReactant(amount=5, formula="Ca(OH)2")
-    ],
-    initial_solution=InitialSolution(
-        pH=7.5,
-        analysis={
-            "Ca": 120,    # mg/L as Ca
-            "Mg": 40,     # mg/L as Mg  
-            "HCO3": 200,  # mg/L as HCO3
-            "SO4": 150    # mg/L as SO4
-        }
-    ),
-    allow_precipitation=True,
-    equilibrium_minerals=["Calcite", "Brucite"]
-)
+input_data = {
+    "initial_solution": {
+        "units": "mmol/L",
+        "analysis": {
+            "Ca": 3.0,     # mmol/L
+            "Mg": 1.6,     # mmol/L  
+            "C(4)": 3.3,   # mmol/L (use C(4) not HCO3)
+            "S(6)": 1.6    # mmol/L (use S(6) not SO4)
+        },
+        "database": "minteq.dat",
+        "temperature_celsius": 25.0
+    },
+    "reactants": [{"formula": "Ca(OH)2", "amount": 5.0, "units": "mmol"}],
+    "allow_precipitation": True,
+    "equilibrium_minerals": ["Calcite", "Brucite"]
+}
 
+# Call via MCP server
 result = await simulate_chemical_addition(input_data)
 ```
 
-## Kinetic Modeling
+## Batch Processing & Optimization
 
-Advanced kinetic precipitation modeling with time-dependent behavior:
-
-```python
-# Kinetic calcite precipitation
-kinetic_params = KineticParameters(
-    time_steps=[0, 60, 300, 600, 1800, 3600],  # seconds
-    enable_kinetics=True,
-    minerals_kinetic={
-        "Calcite": MineralKineticParams(
-            m0=0,           # Initial moles
-            m=1e-6,         # Seed amount (prevents exhaustion)
-            tol=1e-6,       # Tolerance
-            parms=[10, 0.6] # Rate parameters [k, n]
-        )
-    },
-    use_phreeqc_rates=True
-)
-```
-
-**Recent Kinetic Improvements (Jan 2025):**
-- Robust handling of RK integration failures
-- Complete time series output with solution chemistry
-- Enhanced numerical stability
-- Prevention of mineral exhaustion issues
-
-## Engineering Calculation Sheets
-
-Generate professional documentation for engineering projects:
+Use `batch_process_scenarios` for all optimization tasks including dose finding:
 
 ```python
-from tools.calculation_sheet_generator import generate_calculation_sheet
-
-sheet_data = {
-    "project_info": {
-        "project_name": "Industrial WWT Lime Softening",
-        "project_number": "MWTP-2024-001",
-        "engineer": "John Smith, P.E.",
-        "date": "2024-01-15"
+# Parameter sweep for lime softening optimization
+input_data = {
+    "base_scenario": {
+        "initial_solution": {
+            "units": "mmol/L",
+            "analysis": {"Ca": 3.0, "Mg": 1.6, "C(4)": 3.3},
+            "database": "minteq.dat"
+        },
+        "reactants": [{"formula": "Ca(OH)2", "amount": 0, "units": "mmol"}],
+        "allow_precipitation": True
     },
-    "calculation_type": "lime_softening",
-    "input_data": input_data,
-    "results": result
+    "parameter_sweeps": [{
+        "parameter_path": "reactants.0.amount",
+        "values": [2.0, 3.0, 4.0, 5.0, 6.0]
+    }],
+    "parallel_limit": 5
 }
 
-# Generate professional calculation sheet
-notebook_path, html_path = await generate_calculation_sheet(sheet_data)
+# Returns results for all doses with hardness, pH, and precipitation data
+results = await batch_process_scenarios(input_data)
 ```
+
+## Scientific Integrity Features
+
+**PHREEQC-Only Results**: All user-facing results use pure PHREEQC thermodynamic calculations with no heuristics or approximations.
+
+**Comprehensive Mineral Lists**: Default precipitation modeling includes 50-200 minerals from database rather than limited selections.
+
+**Accurate TDS Calculations**: Based on individual species concentrations, not approximations.
+
+**Smart Optimization**: Internal stoichiometry provides efficient search bounds while final results remain purely thermodynamic.
 
 ## Database Support
 
@@ -178,21 +168,22 @@ The project includes comprehensive CI/CD workflows:
 
 ```
 water-chemistry-mcp/
-├── tools/                    # Core MCP tools
-│   ├── chemical_addition.py  # Chemical dosing simulations
+├── tools/                    # Core MCP tools (5 working)
 │   ├── solution_speciation.py # Water quality analysis
-│   ├── scaling_potential.py  # Membrane scaling prediction
-│   ├── dosing_requirement.py # Optimal dose calculations
+│   ├── chemical_addition.py  # Chemical dosing simulations
 │   ├── solution_mixing.py    # Stream blending analysis
-│   └── calculation_sheet_generator.py # Engineering docs
+│   ├── scaling_potential.py  # Scaling risk assessment
+│   ├── batch_processing.py   # Optimization & parameter sweeps
+│   ├── phreeqc_wrapper.py   # PHREEQC integration core
+│   └── schemas.py           # Data validation schemas
 ├── utils/                    # Utility modules
 │   ├── database_management.py # Database handling
-│   ├── phreeqc_wrapper.py   # PHREEQC integration
 │   ├── amorphous_phases.py  # Advanced precipitation
+│   ├── import_helpers.py    # PhreeqPython detection
 │   └── helpers.py           # Common functions
-├── tests/                   # Comprehensive test suite
-├── templates/               # Calculation sheet templates
-├── databases/               # PHREEQC databases
+├── tests/                   # Comprehensive test suite (10 tests)
+├── templates/               # Calculation templates (7 notebooks)
+├── databases/               # PHREEQC databases (5 databases)
 └── .github/workflows/       # CI/CD workflows
 ```
 
@@ -225,9 +216,11 @@ For Claude Desktop:
 }
 ```
 
-## Contributing
+## Current Status
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+**✅ 5 Working Tools** - Tested and validated with PHREEQC thermodynamics
+**❌ Broken Tools Removed** - Dosing requirement and calculation sheets removed
+**🔬 Scientific Integrity** - All results use pure PHREEQC calculations
 
 ### Development Setup
 
@@ -247,8 +240,8 @@ pytest
 
 ## Documentation
 
-- **[AI Agent System Prompt](AI_AGENT_SYSTEM_PROMPT.md)** - Comprehensive usage guide
-- **[Contributing Guidelines](CONTRIBUTING.md)** - Development guidelines
+- **[AI Agent System Prompt](AI_AGENT_SYSTEM_PROMPT.md)** - Complete usage guide for all 5 working tools
+- **[Implementation Guide](CLAUDE.md)** - Project roadmap and implementation details
 - **[Test Documentation](tests/README.md)** - Testing setup and troubleshooting
 
 ## Architecture

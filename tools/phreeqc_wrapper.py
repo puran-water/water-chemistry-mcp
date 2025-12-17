@@ -647,7 +647,12 @@ def parse_phreeqc_results(
                 
             # Specific conductance
             if hasattr(solution, 'sc'):
-                summary['specific_conductance_uS_cm'] = solution.sc
+                try:
+                    sc_attr = solution.sc
+                    summary['specific_conductance_uS_cm'] = sc_attr() if callable(sc_attr) else sc_attr
+                except Exception:
+                    # Leave unset if not available
+                    pass
             
             # Ionic strength using solution.mu method if available
             try:
@@ -1117,6 +1122,16 @@ async def run_phreeqc_with_phreeqpython(
             'element_totals_molality': solution.elements,
             'species_molality': solution.species_molalities,
         }
+
+        # Include specific conductance if available
+        try:
+            if hasattr(solution, 'sc'):
+                sc_attr = solution.sc
+                sc_val = sc_attr() if callable(sc_attr) else sc_attr
+                if isinstance(sc_val, (int, float)):
+                    results['solution_summary']['specific_conductance_uS_cm'] = sc_val
+        except Exception:
+            pass
         
         # For high pH solutions or when Mg is present, explicitly check for important minerals
         # that might not be included in solution.phases

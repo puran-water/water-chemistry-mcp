@@ -63,22 +63,68 @@ async def simulate_solution_mixing(input_data: Dict[str, Any]) -> Dict[str, Any]
         phreeqc_input = ""
         mix_map = {}
         solutions_input = input_model.solutions_to_mix
-        
-        # Check if fractions or volumes are used
-        total_fraction = sum(s.fraction_or_volume for s in solutions_input)
-        use_fractions = abs(total_fraction - 1.0) < 1e-6  # Assume fractions if sum is close to 1
-        
-        # Build solution blocks and prepare mixing map
+
+        # Determine whether we're using explicit volumes or fractions
+        any_volume = any(getattr(s, 'volume_L', None) is not None for s in solutions_input)
+        any_fraction = any(getattr(s, 'fraction', None) is not None for s in solutions_input)
+        # Back-compat: if only legacy field present
+        if not any_volume and not any_fraction:
+            any_fraction = any(getattr(s, 'fraction_or_volume', None) is not None or getattr(s, 'volume_fraction', None) is not None for s in solutions_input)
+
+        # Build solution blocks and compute weights
+        raw_weights = []  # raw numbers (volumes or fractions)
         for i, sol_input in enumerate(solutions_input):
             sol_num = i + 1
             phreeqc_input += build_solution_block(
-                sol_input.solution.model_dump(exclude_defaults=True), 
+                sol_input.solution.model_dump(exclude_defaults=True),
                 solution_num=sol_num
             )
-            mix_map[sol_num] = sol_input.fraction_or_volume
+
+            # Prefer explicit fields
+            if any_volume:
+                w = getattr(sol_input, 'volume_L', None)
+            else:
+                # Fractions: new field or legacy
+                w = getattr(sol_input, 'fraction', None)
+                if w is None:
+                    # Legacy support
+                    w = getattr(sol_input, 'fraction_or_volume', None)
+                    if w is None:
+                        w = getattr(sol_input, 'volume_fraction', None)
+            raw_weights.append(w)
+
+        # If all weights missing for fractions, default to equal
+        if not any_volume:
+            if all(w is None for w in raw_weights):
+                weights = [1.0 / len(solutions_input)] * len(solutions_input)
+                logger.info("No fractions provided; defaulting to equal fractions.")
+            else:
+                # Replace None weights with zero for normalization, then normalize
+                tmp = [w if (w is not None and w >= 0) else 0.0 for w in raw_weights]
+                s = sum(tmp)
+                if s <= 0:
+                    weights = [1.0 / len(tmp)] * len(tmp)
+                    logger.info("Non-positive fraction sum; defaulting to equal fractions.")
+                else:
+                    # Normalize to sum 1.0
+                    weights = [w / s for w in tmp]
+                    if abs(sum(tmp) - 1.0) > 1e-6:
+                        logger.info("Normalizing volume fractions to sum to 1.0")
+        else:
+            # Volumes: fill missing with 0 and use as-is
+            weights = [w if (w is not None and w >= 0) else 0.0 for w in raw_weights]
+            total_vol = sum(weights)
+            if total_vol <= 0:
+                raise ValueError("All provided volumes are missing or zero; cannot perform volume-based mixing")
+
+        # Prepare MIX mapping (PHREEQC accepts either normalized fractions or absolute volumes)
+        for i, w in enumerate(weights, start=1):
+            mix_map[i] = w
         
-        if not use_fractions:
-            logger.info("Treating mixing inputs as volumes.")
+        if any_volume:
+            logger.info("Treating mixing inputs as volumes (L).")
+        else:
+            logger.info("Treating mixing inputs as fractions (normalized).")
         
         # Build mix block
         phreeqc_input += build_mix_block(mix_num=1, solution_map=mix_map)
@@ -92,13 +138,20 @@ async def simulate_solution_mixing(input_data: Dict[str, Any]) -> Dict[str, Any]
             # Get water chemistry profile from the mixture of solutions
             # Combine the analyses of all solutions for mineral selection
             combined_analysis = {}
-            for sol_input in solutions_input:
+            # For mineral selection, use fraction weights (convert volumes to fractions if needed)
+            if any_volume:
+                total = sum(weights)
+                frac_weights = [w / total for w in weights]
+            else:
+                frac_weights = weights
+
+            for sol_input, wfrac in zip(solutions_input, frac_weights):
                 if hasattr(sol_input.solution, 'analysis') and sol_input.solution.analysis:
                     for element, conc in sol_input.solution.analysis.items():
                         if element in combined_analysis:
-                            combined_analysis[element] += float(conc) * sol_input.fraction_or_volume / total_fraction
+                            combined_analysis[element] += float(conc) * wfrac
                         else:
-                            combined_analysis[element] = float(conc) * sol_input.fraction_or_volume / total_fraction
+                            combined_analysis[element] = float(conc) * wfrac
             
             # Select appropriate minerals based on water chemistry
             from utils.constants import select_minerals_for_water_chemistry

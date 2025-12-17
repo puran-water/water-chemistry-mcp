@@ -513,6 +513,7 @@ def build_selected_output_block(
     lines.append("    -alk true")
     lines.append("    -mu true")  # ionic strength
     lines.append("    -water true")
+    # Note: Specific conductance must be extracted from solution object, not SELECTED_OUTPUT
     
     if totals: lines.append("    -tot true")  # Element totals
     if molalities: lines.append("    -mol true")  # Species molalities

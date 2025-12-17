@@ -305,11 +305,23 @@ class WaterAnalysisInput(BaseModel):
         # Instead, this will be called before field assignment
         return v
     
-    @root_validator(pre=True)
+    @root_validator(pre=True, skip_on_failure=True)
     def handle_ph_case(cls, values):
         """Handle both 'pH' and 'ph' input field names"""
         if 'pH' in values and 'ph' not in values:
             values['ph'] = values.pop('pH')
+        return values
+
+    @root_validator(pre=True, skip_on_failure=True)
+    def handle_temperature_aliases(cls, values):
+        """Accept 'temperature' or 'temp' as aliases for 'temperature_celsius'."""
+        # Prefer explicit temperature_celsius if provided
+        if 'temperature_celsius' not in values:
+            # Map common aliases
+            for alias in ('temperature', 'temp', 'Temperature', 'Temp'):
+                if alias in values:
+                    values['temperature_celsius'] = values.pop(alias)
+                    break
         return values
 
 
@@ -554,11 +566,77 @@ class CalculateDosingRequirementOutput(BaseModel):
 # Tool 4: simulate_solution_mixing
 class SolutionToMix(BaseModel):
     solution: WaterAnalysisInput = Field(..., description="Definition of the solution to mix.")
-    fraction_or_volume: float = Field(..., description="Mixing fraction (0-1) or volume (e.g., Liters). Units implied by context (fractions assumed if sum is ~1.0).")
+    # Accept either 'fraction' or 'volume_L', plus backward-compatible aliases
+    fraction: Optional[float] = Field(None, description="Mixing fraction (0-1). Will be normalized across solutions.")
+    volume_L: Optional[float] = Field(None, description="Mixing volume in liters.")
+    # Backward-compatibility with older schema and external clients
+    fraction_or_volume: Optional[float] = Field(None, description="Deprecated: use 'fraction' or 'volume_L'.")
+    volume_fraction: Optional[float] = Field(None, description="Alias for 'fraction' for compatibility with some clients.")
+
+    @root_validator(pre=True, skip_on_failure=True)
+    def normalize_fraction_volume_fields(cls, values):
+        """Normalize input to prefer explicit 'fraction' or 'volume_L'."""
+        # If volume_fraction provided, map to fraction
+        if 'volume_fraction' in values and 'fraction' not in values:
+            values['fraction'] = values.get('volume_fraction')
+
+        # If only fraction_or_volume is provided, keep it as either fraction or volume
+        if 'fraction_or_volume' in values and 'fraction' not in values and 'volume_L' not in values:
+            values['fraction'] = values.get('fraction_or_volume')
+
+        return values
+
+    @root_validator(skip_on_failure=True)
+    def validate_fraction_or_volume(cls, values):
+        """Ensure exactly one of fraction or volume_L is provided; allow explicit zero for fraction."""
+        frac = values.get('fraction')
+        vol = values.get('volume_L')
+
+        # If both provided, that's ambiguous
+        if frac is not None and vol is not None:
+            raise ValueError("Provide either 'fraction' or 'volume_L', not both")
+
+        # If neither provided, allow later defaulting (e.g., equal fractions) by leaving as None
+        # This will be handled by the mixing tool logic.
+        return values
 
 class SimulateSolutionMixingInput(BaseModel):
     solutions_to_mix: List[SolutionToMix] = Field(..., min_items=2, description="List of solutions and their mixing fractions/volumes.")
     database: Optional[str] = Field(None, description="Path or name of the PHREEQC database file to use.")
+    allow_precipitation: Optional[bool] = Field(True, description="Whether to allow mineral precipitation/dissolution during mixing. Default True.")
+
+    @root_validator(pre=True, skip_on_failure=True)
+    def allow_simplified_solutions_schema(cls, values):
+        """Support simplified input {'solutions': [{analysis..., volume_fraction/volume_L/...}, ...]}.
+        Transforms to structured solutions_to_mix list automatically.
+        """
+        if 'solutions_to_mix' not in values and 'solutions' in values:
+            simplified = values.get('solutions') or []
+            structured = []
+            for item in simplified:
+                # Split into solution and mixing key
+                sol_fields = {}
+                mix_kwargs = {}
+                # Map temperature aliases here too
+                item_copy = dict(item)
+                if 'temperature' in item_copy and 'temperature_celsius' not in item_copy:
+                    item_copy['temperature_celsius'] = item_copy.pop('temperature')
+
+                # volume_fraction -> fraction; volume_L kept; fraction also honored
+                if 'volume_fraction' in item_copy:
+                    mix_kwargs['fraction'] = item_copy.pop('volume_fraction')
+                elif 'fraction' in item_copy:
+                    mix_kwargs['fraction'] = item_copy.pop('fraction')
+                if 'volume_L' in item_copy:
+                    mix_kwargs['volume_L'] = item_copy.pop('volume_L')
+
+                # Remaining fields become WaterAnalysisInput
+                sol_fields = item_copy
+                structured.append({'solution': sol_fields, **mix_kwargs})
+
+            if structured:
+                values['solutions_to_mix'] = structured
+        return values
 
 class SimulateSolutionMixingOutput(SolutionOutput):
     pass

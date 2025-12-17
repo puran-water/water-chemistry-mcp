@@ -131,6 +131,9 @@ async def process_single_scenario(base_solution: Dict[str, Any],
     elif scenario_type == 'parameter_sweep':
         # Sweep a parameter range
         parameter = scenario['parameter']
+        # Normalize temperature alias
+        if parameter in ['temperature', 'temp', 'Temperature', 'Temp']:
+            parameter = 'temperature_celsius'
         values = scenario['values']
         
         sweep_results = []
@@ -170,6 +173,66 @@ async def process_single_scenario(base_solution: Dict[str, Any],
             'train_results': train_results,
             'final_solution': current_solution
         }
+
+    elif scenario_type in ('ph_sweep', 'temperature_sweep', 'dose_response'):
+        # Map common scenario types to supported behavior
+        if scenario_type == 'ph_sweep':
+            parameter = 'pH'
+            values = scenario.get('values')
+            if values is None and all(k in scenario for k in ('start', 'stop', 'step')):
+                try:
+                    import numpy as np
+                    values = list(np.arange(scenario['start'], scenario['stop'] + 1e-9, scenario['step']))
+                except Exception:
+                    values = [scenario['start'], scenario['stop']]
+            if values is None:
+                raise ValueError("ph_sweep requires 'values' or 'start'/'stop'/'step'")
+            sweep_results = []
+            for value in values:
+                modified_solution = dict(base_solution)
+                modified_solution[parameter] = value
+                result = await calculate_solution_speciation(modified_solution)
+                sweep_results.append({parameter: value, 'result': result})
+            return {'sweep_results': sweep_results}
+        elif scenario_type == 'temperature_sweep':
+            parameter = 'temperature_celsius'
+            values = scenario.get('values')
+            if values is None and all(k in scenario for k in ('start', 'stop', 'step')):
+                try:
+                    import numpy as np
+                    values = list(np.arange(scenario['start'], scenario['stop'] + 1e-9, scenario['step']))
+                except Exception:
+                    values = [scenario['start'], scenario['stop']]
+            if values is None:
+                raise ValueError("temperature_sweep requires 'values' or 'start'/'stop'/'step'")
+            sweep_results = []
+            for value in values:
+                modified_solution = dict(base_solution)
+                modified_solution[parameter] = value
+                result = await calculate_solution_speciation(modified_solution)
+                sweep_results.append({parameter: value, 'result': result})
+            return {'sweep_results': sweep_results}
+        else:
+            # dose_response
+            reagent = scenario.get('reagent') or scenario.get('reactant')
+            if not reagent or 'formula' not in reagent:
+                raise ValueError("dose_response requires 'reagent': {'formula': ...}")
+            doses = scenario.get('doses') or scenario.get('values') or []
+            units = scenario.get('units', 'mmol')
+            sweep_results = []
+            for dose in doses:
+                try:
+                    result = await simulate_chemical_addition({
+                        'initial_solution': base_solution,
+                        'reactants': [{'formula': reagent['formula'], 'amount': dose, 'units': units}],
+                        'allow_precipitation': scenario.get('allow_precipitation', True),
+                        'equilibrium_minerals': scenario.get('equilibrium_minerals'),
+                        'database': scenario.get('database', base_solution.get('database', 'minteq.dat'))
+                    })
+                    sweep_results.append({'dose': dose, 'result': result})
+                except Exception as e:
+                    logger.error(f"Dose {dose} failed: {e}")
+            return {'dose_response_results': sweep_results}
     
     elif scenario_type == 'phosphorus_optimization':
         # Advanced phosphorus removal optimization with coagulant selection
@@ -545,8 +608,47 @@ async def optimize_phosphorus_removal(
     
     # Get initial P concentration and use stoichiometry for smart optimization bounds
     initial_analysis = await calculate_solution_speciation(initial_water)
-    p_initial_molal = initial_analysis['element_totals_molality'].get('P', 0)
-    p_initial_mg = p_initial_molal * 30974  # mg/L
+    # Safely extract initial dissolved P from PHREEQC results
+    p_initial_molal = 0.0
+    try:
+        p_initial_molal = float(initial_analysis.get('element_totals_molality', {}).get('P', 0.0) or 0.0)
+    except Exception:
+        p_initial_molal = 0.0
+    p_initial_mg = p_initial_molal * 30974  # mg/L as P
+
+    # Fallback: infer initial P directly from input if PHREEQC reports ~0
+    p_input_mg = None
+    if p_initial_mg <= 0:
+        try:
+            analysis = (initial_water or {}).get('analysis', {}) or {}
+            # Try common phosphorus keys (case-insensitive)
+            p_keys = ['P', 'p', 'phosphorus', 'phosphate', 'PO4', 'P(5)']
+            found_key = None
+            for k in analysis.keys():
+                if k in p_keys or k.lower() in [kk.lower() for kk in p_keys]:
+                    found_key = k
+                    break
+            if found_key is not None:
+                val = analysis[found_key]
+                # Support numeric or dict with value
+                if isinstance(val, (int, float)):
+                    base_units = (initial_water or {}).get('units', 'mg/L').lower()
+                    if base_units in ('mg/l', 'mg\u002fl', 'ppm'):
+                        p_input_mg = float(val)
+                    elif base_units in ('ug/l', 'µg/l', 'ug\u002fl'):
+                        p_input_mg = float(val) / 1000.0
+                    elif base_units in ('mmol/l', 'mmol\u002fl'):
+                        p_input_mg = float(val) * 30.974
+                    elif base_units in ('mol/l', 'mol\u002fl'):
+                        p_input_mg = float(val) * 30974.0
+                    else:
+                        # Assume mg/L if unknown
+                        p_input_mg = float(val)
+                elif isinstance(val, dict) and 'value' in val:
+                    p_input_mg = float(val['value'])
+        except Exception:
+            # If anything goes wrong, leave p_input_mg as None
+            p_input_mg = None
     
     # Use stoichiometric ratios to estimate dose magnitude for bounds only (not reported to user)
     if 'Fe' in coagulant:
@@ -558,6 +660,9 @@ async def optimize_phosphorus_removal(
     
     # Set optimization bounds as multiples of stoichiometric estimate
     max_reasonable_dose = estimated_coagulant_molal * 4.0  # 4x upper bound for optimization search
+    # Ensure we have a sane positive upper bound even if initial P parsed as zero
+    if max_reasonable_dose <= 0:
+        max_reasonable_dose = 5.0  # fallback sweep upper bound (mmol/L)
     
     # Set up objectives
     objectives = [{
@@ -593,9 +698,12 @@ async def optimize_phosphorus_removal(
     
     # Use parameter sweep for phosphorus removal optimization (replaces broken enhanced tool)
     logger.info(f"Using parameter sweep for P removal with estimated max dose: {max_reasonable_dose:.3f} mmol/L")
-    
+
     # Create coagulant dose sweep
     coagulant_doses = np.linspace(0.1, max_reasonable_dose, 12)
+
+    # Track iterations for debugging/inspection
+    optimization_path: List[Dict[str, Any]] = []
     
     if target_ph is not None:
         # Grid search for coagulant + NaOH
@@ -620,14 +728,27 @@ async def optimize_phosphorus_removal(
                         'database': database
                     })
                     
+                    # Skip errored results
+                    if isinstance(result, dict) and result.get('error'):
+                        logger.error(f"Dose combination produced error: {result.get('error')}")
+                        optimization_path.append({
+                            'coagulant_mmol': coag_dose,
+                            'naoh_mmol': naoh_dose,
+                            'error': result.get('error')
+                        })
+                        continue
+
                     # Calculate phosphorus and pH
                     p_final_molal = result['element_totals_molality'].get('P', 0)
                     p_final_mg = p_final_molal * 30974  # mg/L
-                    final_ph = result['pH']
+                    final_ph = result.get('solution_summary', {}).get('pH')
+                    # Handle missing pH gracefully
+                    if final_ph is None:
+                        final_ph = float('inf')
                     
                     # Check if this is better
                     p_diff = abs(p_final_mg - target_p_mg_l)
-                    ph_diff = abs(final_ph - target_ph) if target_ph else 0
+                    ph_diff = abs(final_ph - target_ph) if (target_ph is not None and final_ph != float('inf')) else 0
                     
                     # Combined score (prioritize P removal)
                     if p_diff < best_p_diff or (p_diff <= best_p_diff * 1.2 and ph_diff < best_ph_diff):
@@ -637,10 +758,25 @@ async def optimize_phosphorus_removal(
                         best_coag_dose = coag_dose
                         best_naoh_dose = naoh_dose
                         
-                    logger.debug(f"Coag {coag_dose:.2f}, NaOH {naoh_dose:.2f}: P={p_final_mg:.3f}, pH={final_ph:.2f}")
+                    try:
+                        logger.debug(f"Coag {coag_dose:.2f}, NaOH {naoh_dose:.2f}: P={p_final_mg:.3f}, pH={float(final_ph):.2f}")
+                    except Exception:
+                        logger.debug(f"Coag {coag_dose:.2f}, NaOH {naoh_dose:.2f}: P={p_final_mg:.3f}, pH={final_ph}")
+                    # Record iteration
+                    optimization_path.append({
+                        'coagulant_mmol': coag_dose,
+                        'naoh_mmol': naoh_dose,
+                        'p_mg_l': p_final_mg,
+                        'pH': None if final_ph == float('inf') else final_ph
+                    })
                     
                 except Exception as e:
                     logger.error(f"Dose combination failed: {e}")
+                    optimization_path.append({
+                        'coagulant_mmol': coag_dose,
+                        'naoh_mmol': naoh_dose,
+                        'error': str(e)
+                    })
     else:
         # Single coagulant optimization
         best_result = None
@@ -657,6 +793,14 @@ async def optimize_phosphorus_removal(
                     'database': database
                 })
                 
+                if isinstance(result, dict) and result.get('error'):
+                    logger.error(f"Dose {coag_dose:.2f} produced error: {result.get('error')}")
+                    optimization_path.append({
+                        'coagulant_mmol': coag_dose,
+                        'error': result.get('error')
+                    })
+                    continue
+
                 # Calculate phosphorus
                 p_final_molal = result['element_totals_molality'].get('P', 0)
                 p_final_mg = p_final_molal * 30974  # mg/L
@@ -669,24 +813,56 @@ async def optimize_phosphorus_removal(
                     best_coag_dose = coag_dose
                     
                 logger.debug(f"Coag {coag_dose:.2f}: P={p_final_mg:.3f} mg/L")
+                optimization_path.append({
+                    'coagulant_mmol': coag_dose,
+                    'p_mg_l': p_final_mg
+                })
                 
             except Exception as e:
                 logger.error(f"Dose {coag_dose:.2f} failed: {e}")
+                optimization_path.append({
+                    'coagulant_mmol': coag_dose,
+                    'error': str(e)
+                })
     
     if best_result:
         # Add optimization summary
+        achieved_p_mg = best_result['element_totals_molality'].get('P', 0) * 30974
+        # Choose a safe denominator for efficiency
+        denom = None
+        if p_initial_mg and p_initial_mg > 0:
+            denom = p_initial_mg
+        elif p_input_mg and p_input_mg > 0:
+            denom = p_input_mg
+        p_removal_eff = None if not denom else ((denom - achieved_p_mg) / denom) * 100
+
         best_result['optimization_summary'] = {
             'optimal_coagulant_dose_mmol': best_coag_dose,
             'optimal_naoh_dose_mmol': best_naoh_dose if target_ph else None,
             'target_p_mg_l': target_p_mg_l,
-            'achieved_p_mg_l': best_result['element_totals_molality'].get('P', 0) * 30974,
+            'achieved_p_mg_l': achieved_p_mg,
             'target_ph': target_ph,
-            'achieved_ph': best_result['pH'],
-            'p_removal_efficiency': ((p_initial_mg - best_result['element_totals_molality'].get('P', 0) * 30974) / p_initial_mg) * 100
+            'achieved_ph': best_result.get('solution_summary', {}).get('pH'),
+            'p_removal_efficiency': p_removal_eff,
+            'initial_p_mg_l_from_sim': p_initial_mg,
+            'initial_p_mg_l_from_input': p_input_mg,
+            'optimization_path': optimization_path
         }
+        # If we could not compute efficiency, provide a helpful note
+        if p_removal_eff is None:
+            best_result['optimization_summary']['note'] = (
+                'Initial dissolved phosphorus was zero or unavailable; '
+                'removal efficiency not computed.'
+            )
         logger.info(f"Optimal doses - {coagulant}: {best_coag_dose:.3f} mmol/L" + 
                    (f", NaOH: {best_naoh_dose:.3f} mmol/L" if best_naoh_dose else ""))
         return best_result
     else:
-        raise ValueError("All dose combinations failed - check water chemistry and database")
-
+        # Return structured error with iterations for debugging
+        return {
+            'error': 'All dose combinations failed - check water chemistry and database',
+            'optimization_path': optimization_path,
+            'coagulant': coagulant,
+            'target_p_mg_l': target_p_mg_l,
+            'target_ph': target_ph
+        }

@@ -35,15 +35,21 @@ jobs:
     - name: Download PHREEQC databases
       run: |
         cd databases/official
-        # Download test databases for integration testing
-        curl -L -o minteq.dat "https://www.usgs.gov/media/files/minteq-v4-thermodynamic-database" || echo "Failed to download minteq.dat"
-        curl -L -o phreeqc.dat "https://www.usgs.gov/media/files/phreeqc-thermodynamic-database" || echo "Failed to download phreeqc.dat"
-        # Create fallback minimal databases if downloads fail
-        if [ ! -f minteq.dat ]; then
-          echo "# Minimal test database" > minteq.dat
-          echo "SOLUTION_MASTER_SPECIES" >> minteq.dat
-          echo "Ca     Ca+2     0.0     40.078     40.078" >> minteq.dat
-          echo "END" >> minteq.dat
+        # Download test databases from USGS PHREEQC GitHub repository
+        curl -L -o minteq.dat "https://raw.githubusercontent.com/usgs-coupled/phreeqc3/master/database/minteq.dat" || echo "Failed to download minteq.dat"
+        curl -L -o phreeqc.dat "https://raw.githubusercontent.com/usgs-coupled/phreeqc3/master/database/phreeqc.dat" || echo "Failed to download phreeqc.dat"
+        # Verify downloads succeeded
+        if [ -f minteq.dat ] && [ -s minteq.dat ]; then
+          echo "✓ minteq.dat downloaded successfully ($(wc -l < minteq.dat) lines)"
+        else
+          echo "✗ Failed to download minteq.dat"
+          exit 1
+        fi
+        if [ -f phreeqc.dat ] && [ -s phreeqc.dat ]; then
+          echo "✓ phreeqc.dat downloaded successfully ($(wc -l < phreeqc.dat) lines)"
+        else
+          echo "✗ Failed to download phreeqc.dat"
+          exit 1
         fi
 
     - name: Run chemical addition integration tests

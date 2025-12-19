@@ -8,6 +8,7 @@ nbformat>=5.9.0
 nbconvert>=7.11.0
 jupyter>=1.0.0
 numpy>=1.21.0
+scipy>=1.10.0  # Required by phreeqpython (undeclared dependency)
 requests>=2.25.0
 
 # Development dependencies (optional)

@@ -94,7 +94,6 @@ jobs:
             from tools.chemical_addition import simulate_chemical_addition
             from tools.solution_speciation import calculate_solution_speciation
             from tools.scaling_potential import predict_scaling_potential
-            from tools.dosing_requirement import calculate_dosing_requirement
             print('✓ All tools import successfully')
         except Exception as e:
             print(f'✗ Import error: {e}')

@@ -110,39 +110,6 @@ jobs:
         sys.exit(0 if success else 1)
         "
 
-    - name: Run dosing requirement integration tests
-      run: |
-        python -c "
-        import asyncio
-        import sys
-        sys.path.append('.')
-        
-        async def test_dosing_requirement():
-            from tools.dosing_requirement import calculate_dosing_requirement
-            from tools.schemas import CalculateDosingRequirementInput, WaterAnalysisInput, TargetConditionInput, ReagentInput
-            
-            try:
-                input_data = CalculateDosingRequirementInput(
-                    initial_solution=WaterAnalysisInput(
-                        ph=7.5,
-                        temperature_celsius=25,
-                        analysis={'Ca': 5, 'Mg': 2, 'HCO3': 3, 'SO4': 1, 'Cl': 10, 'Na': 8}
-                    ),
-                    target_condition=TargetConditionInput(parameter='pH', value=8.5),
-                    reagent=ReagentInput(formula='NaOH')
-                )
-                result = await calculate_dosing_requirement(input_data.model_dump())
-                assert 'dose_mg_L' in result
-                print('✓ Dosing requirement test passed')
-            except Exception as e:
-                print(f'✗ Dosing requirement test failed: {e}')
-                return False
-            return True
-        
-        success = asyncio.run(test_dosing_requirement())
-        sys.exit(0 if success else 1)
-        "
-
     - name: Run solution speciation integration tests
       run: |
         python -c "

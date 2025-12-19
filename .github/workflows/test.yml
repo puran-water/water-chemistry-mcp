@@ -92,7 +92,7 @@ jobs:
         sys.path.append('.')
         try:
             from tools.chemical_addition import simulate_chemical_addition
-            from tools.solution_speciation import analyze_solution_speciation
+            from tools.solution_speciation import calculate_solution_speciation
             from tools.scaling_potential import predict_scaling_potential
             from tools.dosing_requirement import calculate_dosing_requirement
             print('✓ All tools import successfully')

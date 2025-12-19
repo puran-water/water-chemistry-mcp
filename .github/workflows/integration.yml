@@ -69,7 +69,7 @@ jobs:
                     reactants=[ReactantInput(amount=1, formula='NaOH')],
                     initial_solution=WaterAnalysisInput(ph=7, analysis={'Ca': 5, 'Cl': 10})
                 )
-                result = await simulate_chemical_addition(input_data)
+                result = await simulate_chemical_addition(input_data.model_dump())
                 assert 'solution_summary' in result
                 print('✓ Chemical addition test passed')
             except Exception as e:
@@ -98,7 +98,7 @@ jobs:
                     temperature_celsius=25,
                     analysis={'Ca': 5, 'Mg': 2, 'HCO3': 3, 'SO4': 1, 'Cl': 10, 'Na': 8}
                 )
-                result = await predict_scaling_potential(input_data)
+                result = await predict_scaling_potential(input_data.model_dump())
                 assert 'scaling_indices' in result
                 print('✓ Scaling potential test passed')
             except Exception as e:
@@ -131,7 +131,7 @@ jobs:
                     target_condition=TargetConditionInput(parameter='pH', value=8.5),
                     reagent=ReagentInput(formula='NaOH')
                 )
-                result = await calculate_dosing_requirement(input_data)
+                result = await calculate_dosing_requirement(input_data.model_dump())
                 assert 'dose_mg_L' in result
                 print('✓ Dosing requirement test passed')
             except Exception as e:
@@ -160,7 +160,7 @@ jobs:
                     temperature_celsius=25,
                     analysis={'Ca': 5, 'Mg': 2, 'HCO3': 3, 'SO4': 1, 'Cl': 10, 'Na': 8}
                 )
-                result = await analyze_solution_speciation(input_data)
+                result = await analyze_solution_speciation(input_data.model_dump())
                 assert 'species_molality' in result
                 print('✓ Solution speciation test passed')
             except Exception as e:
@@ -205,7 +205,7 @@ jobs:
                         use_phreeqc_rates=True
                     )
                 )
-                result = await simulate_chemical_addition(input_data)
+                result = await simulate_chemical_addition(input_data.model_dump())
                 assert 'kinetic_profiles' in result
                 profile = result['kinetic_profiles'][0]
                 assert len(profile['time_seconds']) >= 2

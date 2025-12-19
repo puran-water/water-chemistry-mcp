@@ -151,7 +151,7 @@ jobs:
         sys.path.append('.')
         
         async def test_solution_speciation():
-            from tools.solution_speciation import analyze_solution_speciation
+            from tools.solution_speciation import calculate_solution_speciation
             from tools.schemas import CalculateSolutionSpeciationInput
             
             try:
@@ -160,7 +160,7 @@ jobs:
                     temperature_celsius=25,
                     analysis={'Ca': 5, 'Mg': 2, 'HCO3': 3, 'SO4': 1, 'Cl': 10, 'Na': 8}
                 )
-                result = await analyze_solution_speciation(input_data.model_dump())
+                result = await calculate_solution_speciation(input_data.model_dump())
                 assert 'species_molality' in result
                 print('✓ Solution speciation test passed')
             except Exception as e:

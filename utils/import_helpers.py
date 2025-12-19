@@ -54,7 +54,7 @@ try:
     DEFAULT_DATABASE_PATH = None
 
     # Try USGS PHREEQC database path first
-    if os.path.exists(USGS_PHREEQC_DATABASE_PATH) and os.path.isdir(USGS_PHREEQC_DATABASE_PATH):
+    if USGS_PHREEQC_DATABASE_PATH and os.path.exists(USGS_PHREEQC_DATABASE_PATH) and os.path.isdir(USGS_PHREEQC_DATABASE_PATH):
         DEFAULT_DATABASE_PATH = USGS_PHREEQC_DATABASE_PATH
         logger.info(f"Using USGS PHREEQC database directory: {DEFAULT_DATABASE_PATH}")
 
@@ -150,7 +150,7 @@ def get_available_database_paths() -> List[str]:
         return available_dbs
 
     # First check the USGS PHREEQC database directory
-    if os.path.exists(USGS_PHREEQC_DATABASE_PATH) and os.path.isdir(USGS_PHREEQC_DATABASE_PATH):
+    if USGS_PHREEQC_DATABASE_PATH and os.path.exists(USGS_PHREEQC_DATABASE_PATH) and os.path.isdir(USGS_PHREEQC_DATABASE_PATH):
         logger.info(f"Found USGS PHREEQC database directory: {USGS_PHREEQC_DATABASE_PATH}")
 
         # Add databases from USGS directory in order of preference

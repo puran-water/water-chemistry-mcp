@@ -18,11 +18,8 @@ from mcp.server.fastmcp import FastMCP
 # Configure logging with debug support
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('debug.log'),
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("debug.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger("water-chemistry-mcp")
 
@@ -42,11 +39,11 @@ from tools.batch_processing import batch_process_scenarios
 # - Enhanced optimization tools (replaced by batch_process_scenarios parameter sweeps)
 
 # Register working tools only - tested and validated
-mcp.tool()(calculate_solution_speciation)       # Tool 1: Solution speciation and equilibrium analysis
-mcp.tool()(simulate_chemical_addition)          # Tool 2: Chemical addition with precipitation
-mcp.tool()(simulate_solution_mixing)            # Tool 3: Solution blending and mixing  
-mcp.tool()(predict_scaling_potential)           # Tool 4: Scaling risk assessment
-mcp.tool()(batch_process_scenarios)             # Tool 5: Parallel scenario processing & optimization
+mcp.tool()(calculate_solution_speciation)  # Tool 1: Solution speciation and equilibrium analysis
+mcp.tool()(simulate_chemical_addition)  # Tool 2: Chemical addition with precipitation
+mcp.tool()(simulate_solution_mixing)  # Tool 3: Solution blending and mixing
+mcp.tool()(predict_scaling_potential)  # Tool 4: Scaling risk assessment
+mcp.tool()(batch_process_scenarios)  # Tool 5: Parallel scenario processing & optimization
 
 # Log information about available dependencies
 from utils.import_helpers import PHREEQPYTHON_AVAILABLE
@@ -55,12 +52,12 @@ from utils.database_management import database_manager
 if __name__ == "__main__":
     logger.info("Starting Water Chemistry MCP server...")
     logger.info(f"PhreeqPython available: {PHREEQPYTHON_AVAILABLE}")
-    
+
     # Log database information using the database manager
     if PHREEQPYTHON_AVAILABLE:
         default_db = database_manager.default_database
         logger.info(f"Using default database: {default_db}")
-        
+
         # Log all available databases
         available_dbs = database_manager.available_databases
         if available_dbs:
@@ -68,7 +65,7 @@ if __name__ == "__main__":
             for i, db_path in enumerate(available_dbs[:5]):
                 # Get additional info about the database
                 db_info = database_manager.get_database_info(db_path)
-                features = ', '.join([f for f, enabled in db_info.get('features', {}).items() if enabled])
+                features = ", ".join([f for f, enabled in db_info.get("features", {}).items() if enabled])
                 logger.info(
                     f"  {i+1}. {os.path.basename(db_path)} - "
                     f"Elements: {db_info.get('element_count', 'Unknown')}, "
@@ -81,7 +78,7 @@ if __name__ == "__main__":
             logger.warning("No PHREEQC database files found")
     else:
         logger.warning("PhreeqPython not available, cannot use PHREEQC databases")
-    
+
     # Log which tools are registered
     logger.info("=== WATER CHEMISTRY MCP SERVER - TESTED & VALIDATED ===\n")
     logger.info("Registered 5 working tools (broken tools removed based on testing):")
@@ -99,6 +96,6 @@ if __name__ == "__main__":
     logger.info("\n✅ TESTED & WORKING - PHREEQC THERMODYNAMICS ONLY")
     logger.info("✅ BATCH PROCESSING HANDLES ALL OPTIMIZATION NEEDS")
     logger.info("\n=== SERVER READY FOR RELIABLE USE ===")
-    
+
     # Start the server
     mcp.run()

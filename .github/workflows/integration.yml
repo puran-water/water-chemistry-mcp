@@ -36,13 +36,13 @@ jobs:
       run: |
         cd databases/official
         # Download test databases from USGS PHREEQC GitHub repository
-        curl -L -o minteq.dat "https://raw.githubusercontent.com/usgs-coupled/phreeqc3/master/database/minteq.dat" || echo "Failed to download minteq.dat"
+        curl -L -o minteq.v4.dat "https://raw.githubusercontent.com/usgs-coupled/phreeqc3/master/database/minteq.v4.dat" || echo "Failed to download minteq.v4.dat"
         curl -L -o phreeqc.dat "https://raw.githubusercontent.com/usgs-coupled/phreeqc3/master/database/phreeqc.dat" || echo "Failed to download phreeqc.dat"
         # Verify downloads succeeded
-        if [ -f minteq.dat ] && [ -s minteq.dat ]; then
-          echo "✓ minteq.dat downloaded successfully ($(wc -l < minteq.dat) lines)"
+        if [ -f minteq.v4.dat ] && [ -s minteq.v4.dat ]; then
+          echo "✓ minteq.v4.dat downloaded successfully ($(wc -l < minteq.v4.dat) lines)"
         else
-          echo "✗ Failed to download minteq.dat"
+          echo "✗ Failed to download minteq.v4.dat"
           exit 1
         fi
         if [ -f phreeqc.dat ] && [ -s phreeqc.dat ]; then

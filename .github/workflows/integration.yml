@@ -53,6 +53,8 @@ jobs:
         fi
 
     - name: Run chemical addition integration tests
+      env:
+        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
       run: |
         python -c "
         import asyncio
@@ -82,6 +84,8 @@ jobs:
         "
 
     - name: Run scaling potential integration tests
+      env:
+        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
       run: |
         python -c "
         import asyncio
@@ -111,6 +115,8 @@ jobs:
         "
 
     - name: Run solution speciation integration tests
+      env:
+        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
       run: |
         python -c "
         import asyncio
@@ -140,6 +146,8 @@ jobs:
         "
 
     - name: Run kinetic modeling integration tests
+      env:
+        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
       run: |
         python -c "
         import asyncio

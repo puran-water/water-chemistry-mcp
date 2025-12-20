@@ -129,10 +129,7 @@ class DatabaseManager:
 
         # Basic info
         db_name = os.path.basename(database_path)
-        is_usgs = (
-            USGS_PHREEQC_DATABASE_PATH is not None
-            and database_path.startswith(USGS_PHREEQC_DATABASE_PATH)
-        )
+        is_usgs = USGS_PHREEQC_DATABASE_PATH is not None and database_path.startswith(USGS_PHREEQC_DATABASE_PATH)
         is_default = database_path == self.default_database
 
         # Read file to get more detailed info

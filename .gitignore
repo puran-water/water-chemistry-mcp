@@ -184,3 +184,6 @@ download_*.py
 
 # Claude Code settings
 **/.claude/settings.local.json
+
+# Codex/OpenAI credentials
+.codex/

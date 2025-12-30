@@ -23,8 +23,9 @@ from typing import Dict, Any, List, Optional, Tuple
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tools.dosing_requirement import calculate_dosing_requirement, calculate_dosing_requirement_enhanced
-from tools.batch_processing import batch_process_scenarios, generate_lime_softening_curve
+from tools.dosing_requirement import calculate_dosing_requirement
+from tools.optimization_tools import calculate_dosing_requirement_enhanced, generate_lime_softening_curve
+from tools.batch_processing import batch_process_scenarios
 from tools.solution_speciation import calculate_solution_speciation
 
 

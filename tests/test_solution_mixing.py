@@ -1,12 +1,9 @@
-"""
+r"""
 Comprehensive test script for simulate_solution_mixing tool.
 Tests both equilibrium and kinetic precipitation modeling during mixing.
 
-Run from Windows cmd.exe with:
-cd C:\Users\hvksh\mcp-servers
-venv\Scripts\activate
-cd water-chemistry-mcp
-python tests\test_solution_mixing.py
+Run from project root with:
+python tests/test_solution_mixing.py
 """
 
 import asyncio

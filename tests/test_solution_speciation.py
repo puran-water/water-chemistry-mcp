@@ -8,9 +8,10 @@ import asyncio
 import sys
 import json
 from datetime import datetime
+from pathlib import Path
 
-# Add parent directory to path
-sys.path.insert(0, 'C:\\Users\\hvksh\\mcp-servers\\water-chemistry-mcp')
+# Add parent directory to path (portable, works on any machine)
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tools.solution_speciation import calculate_solution_speciation
 

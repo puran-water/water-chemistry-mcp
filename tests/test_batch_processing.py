@@ -26,7 +26,8 @@ from tools.batch_processing import (
     generate_lime_softening_curve,
     calculate_lime_softening_dose,
     optimize_phosphorus_removal,
-    optimize_multi_reagent_treatment
+    # Note: optimize_multi_reagent_treatment is handled via batch_process_scenarios
+    # with scenario_type="multi_reagent_optimization"
 )
 
 

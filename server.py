@@ -12,38 +12,241 @@ Author: Claude AI
 """
 
 import logging
+import logging.handlers
 import os
+import sys
 from mcp.server.fastmcp import FastMCP
 
-# Configure logging with debug support
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("debug.log"), logging.StreamHandler()],
+# MCP BEST PRACTICE: Configure logging to use stderr (NOT stdout, which is the MCP channel)
+# Also use log rotation to prevent unbounded log file growth
+_log_handler = logging.handlers.RotatingFileHandler(
+    "debug.log", maxBytes=5 * 1024 * 1024, backupCount=3  # 5MB per file, 3 backups
 )
-logger = logging.getLogger("water-chemistry-mcp")
+_stderr_handler = logging.StreamHandler(sys.stderr)  # stderr, not stdout!
 
-# Initialize the MCP server
-mcp = FastMCP("water-chemistry-calculator")
+logging.basicConfig(
+    level=logging.INFO,  # INFO for production (DEBUG available via env var)
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[_log_handler, _stderr_handler],
+)
 
-# Import core tools - batch processing proven most reliable
+# Allow DEBUG level via environment variable
+if os.environ.get("WATER_CHEMISTRY_DEBUG", "").lower() in ("1", "true", "yes"):
+    logging.getLogger().setLevel(logging.DEBUG)
+
+logger = logging.getLogger("water_chemistry_mcp")
+
+# MCP BEST PRACTICE: Server name follows Python convention: {service}_mcp
+mcp = FastMCP("water_chemistry_mcp")
+
+# =============================================================================
+# Import all tools
+# =============================================================================
+
+# Core analysis tools
 from tools.solution_speciation import calculate_solution_speciation
 from tools.chemical_addition import simulate_chemical_addition
 from tools.solution_mixing import simulate_solution_mixing
 from tools.scaling_potential import predict_scaling_potential
 from tools.batch_processing import batch_process_scenarios
 
-# Note: Removed broken tools based on testing:
-# - calculate_dosing_requirement (database errors with minteq.dat)
-# - generate_calculation_sheet (remove as requested)
-# - Enhanced optimization tools (replaced by batch_process_scenarios parameter sweeps)
+# NEW: Dosing requirement (phreeqpython API implementation)
+from tools.dosing_requirement import calculate_dosing_requirement
 
-# Register working tools only - tested and validated
-mcp.tool()(calculate_solution_speciation)  # Tool 1: Solution speciation and equilibrium analysis
-mcp.tool()(simulate_chemical_addition)  # Tool 2: Chemical addition with precipitation
-mcp.tool()(simulate_solution_mixing)  # Tool 3: Solution blending and mixing
-mcp.tool()(predict_scaling_potential)  # Tool 4: Scaling risk assessment
-mcp.tool()(batch_process_scenarios)  # Tool 5: Parallel scenario processing & optimization
+# NEW: Thermodynamic database query
+from tools.thermodynamic_database import query_thermodynamic_database
+
+# NEW: Kinetic reactions
+from tools.kinetic_reaction import simulate_kinetic_reaction
+
+# NEW: Advanced PHREEQC features
+from tools.gas_phase import simulate_gas_phase_interaction
+from tools.redox_adjustment import simulate_redox_adjustment
+from tools.surface_interaction import simulate_surface_interaction
+
+# NEW: Optimization tools
+from tools.optimization_tools import (
+    generate_lime_softening_curve,
+    calculate_lime_softening_dose,
+    optimize_phosphorus_removal,
+    calculate_dosing_requirement_enhanced,
+    optimize_multi_reagent_treatment,
+)
+
+# MCP BEST PRACTICE: Register tools with proper annotations
+# Annotations help clients understand tool behavior:
+# - readOnlyHint: Tool does not modify its environment
+# - destructiveHint: Tool may perform destructive updates
+# - idempotentHint: Repeated calls with same args have no additional effect
+# - openWorldHint: Tool interacts with external entities
+
+mcp.tool(
+    annotations={
+        "title": "Calculate Solution Speciation",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(calculate_solution_speciation)
+
+mcp.tool(
+    annotations={
+        "title": "Simulate Chemical Addition",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    }
+)(simulate_chemical_addition)
+
+mcp.tool(
+    annotations={
+        "title": "Simulate Solution Mixing",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    }
+)(simulate_solution_mixing)
+
+mcp.tool(
+    annotations={
+        "title": "Predict Scaling Potential",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(predict_scaling_potential)
+
+mcp.tool(
+    annotations={
+        "title": "Batch Process Scenarios",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    }
+)(batch_process_scenarios)
+
+# =============================================================================
+# NEW TOOLS: Dosing, Database Query, Kinetics, Advanced Features
+# =============================================================================
+
+mcp.tool(
+    annotations={
+        "title": "Calculate Dosing Requirement",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(calculate_dosing_requirement)
+
+mcp.tool(
+    annotations={
+        "title": "Query Thermodynamic Database",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(query_thermodynamic_database)
+
+mcp.tool(
+    annotations={
+        "title": "Simulate Kinetic Reaction",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(simulate_kinetic_reaction)
+
+mcp.tool(
+    annotations={
+        "title": "Simulate Gas Phase Interaction",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(simulate_gas_phase_interaction)
+
+mcp.tool(
+    annotations={
+        "title": "Simulate Redox Adjustment",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(simulate_redox_adjustment)
+
+mcp.tool(
+    annotations={
+        "title": "Simulate Surface Interaction",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(simulate_surface_interaction)
+
+# =============================================================================
+# OPTIMIZATION TOOLS: Specialized treatment optimization
+# =============================================================================
+
+mcp.tool(
+    annotations={
+        "title": "Generate Lime Softening Curve",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(generate_lime_softening_curve)
+
+mcp.tool(
+    annotations={
+        "title": "Calculate Lime Softening Dose",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(calculate_lime_softening_dose)
+
+mcp.tool(
+    annotations={
+        "title": "Optimize Phosphorus Removal",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(optimize_phosphorus_removal)
+
+mcp.tool(
+    annotations={
+        "title": "Calculate Dosing Requirement Enhanced",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(calculate_dosing_requirement_enhanced)
+
+mcp.tool(
+    annotations={
+        "title": "Optimize Multi-Reagent Treatment",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(optimize_multi_reagent_treatment)
 
 # Log information about available dependencies
 from utils.import_helpers import PHREEQPYTHON_AVAILABLE
@@ -80,22 +283,30 @@ if __name__ == "__main__":
         logger.warning("PhreeqPython not available, cannot use PHREEQC databases")
 
     # Log which tools are registered
-    logger.info("=== WATER CHEMISTRY MCP SERVER - TESTED & VALIDATED ===\n")
-    logger.info("Registered 5 working tools (broken tools removed based on testing):")
-    logger.info("\nCORE ANALYSIS TOOLS (4):")
+    logger.info("=== WATER CHEMISTRY MCP SERVER v2.1 ===\n")
+    logger.info("Registered 16 tools:\n")
+    logger.info("CORE ANALYSIS TOOLS (5):")
     logger.info("  1. calculate_solution_speciation: Water quality analysis and equilibrium speciation")
     logger.info("  2. simulate_chemical_addition: Treatment simulation with precipitation modeling")
     logger.info("  3. simulate_solution_mixing: Stream blending and mixing analysis")
     logger.info("  4. predict_scaling_potential: Scaling risk assessment for all systems")
-    logger.info("\nOPTIMIZATION TOOL (1):")
-    logger.info("  5. batch_process_scenarios: Parallel scenario processing & all optimization tasks")
-    logger.info("\n❌ REMOVED BROKEN TOOLS:")
-    logger.info("  • calculate_dosing_requirement: Database errors with minteq.dat")
-    logger.info("  • generate_calculation_sheet: Removed as requested")
-    logger.info("  • Enhanced optimization tools: Replaced by batch_process_scenarios parameter sweeps")
-    logger.info("\n✅ TESTED & WORKING - PHREEQC THERMODYNAMICS ONLY")
-    logger.info("✅ BATCH PROCESSING HANDLES ALL OPTIMIZATION NEEDS")
-    logger.info("\n=== SERVER READY FOR RELIABLE USE ===")
+    logger.info("  5. batch_process_scenarios: Parallel scenario processing & optimization")
+    logger.info("\nADVANCED PHREEQC TOOLS (6):")
+    logger.info("  6. calculate_dosing_requirement: Binary search for target pH/hardness/SI")
+    logger.info("  7. query_thermodynamic_database: Query minerals, species, elements")
+    logger.info("  8. simulate_kinetic_reaction: Time-dependent reaction modeling")
+    logger.info("  9. simulate_gas_phase_interaction: Gas-water equilibration")
+    logger.info("  10. simulate_redox_adjustment: pe/Eh/couple adjustment")
+    logger.info("  11. simulate_surface_interaction: Surface complexation/adsorption")
+    logger.info("\nOPTIMIZATION TOOLS (5):")
+    logger.info("  12. generate_lime_softening_curve: Complete dose-response curves")
+    logger.info("  13. calculate_lime_softening_dose: Optimal lime softening dose")
+    logger.info("  14. optimize_phosphorus_removal: P removal with coagulant selection")
+    logger.info("  15. calculate_dosing_requirement_enhanced: Multi-objective dosing optimization")
+    logger.info("  16. optimize_multi_reagent_treatment: Multi-reagent with 4 strategies")
+    logger.info("\n✅ FAIL LOUDLY: All errors raise typed exceptions")
+    logger.info("✅ PHREEQC thermodynamics via phreeqpython API")
+    logger.info("\n=== SERVER READY ===")
 
     # Start the server
     mcp.run()

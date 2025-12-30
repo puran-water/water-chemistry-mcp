@@ -1,12 +1,9 @@
-"""
+r"""
 Comprehensive test script for predict_scaling_potential tool.
 Tests both equilibrium and kinetic approaches to scale prediction.
 
-Run from Windows cmd.exe with:
-cd C:\Users\hvksh\mcp-servers
-venv\Scripts\activate
-cd water-chemistry-mcp
-python tests\test_scaling_potential.py
+Run from project root with:
+python tests/test_scaling_potential.py
 """
 
 import asyncio

@@ -1,10 +1,21 @@
 """
 Helper functions for water chemistry calculations.
+
+FAIL LOUDLY: These functions raise typed exceptions instead of returning
+empty strings on error. This ensures errors are never silently ignored.
 """
 
 import logging
 import re
 from typing import Dict, Any, List, Optional, Union, Tuple
+
+from .exceptions import (
+    InputValidationError,
+    KineticsDefinitionError,
+    SurfaceDefinitionError,
+    GasPhaseError,
+    RedoxSpecificationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,23 +77,24 @@ def build_solution_block(solution_data: Dict[str, Any], solution_num: int = 1, s
         element_to_use = ELEMENT_MAPPING.get(element, element)
 
         if isinstance(value, (int, float)):
-            lines.append(f"    {element_to_use:<10}{value}")
+            # Use 14 chars to ensure space after long element names like "Alkalinity"
+            lines.append(f"    {element_to_use:<14}{value}")
         elif isinstance(value, str):  # Handle 'Alkalinity as CaCO3 120' or 'S(6) 96'
             parts = value.split()
             if len(parts) >= 2:
                 # Check if second part is a number (e.g., "Ca 40")
                 try:
                     float(parts[1])
-                    lines.append(f"    {parts[0]:<10}{' '.join(parts[1:])}")
+                    lines.append(f"    {parts[0]:<14}{' '.join(parts[1:])}")
                 except ValueError:
                     # Assume format like "Alkalinity as CaCO3 120"
-                    lines.append(f"    {element:<10}{value}")
+                    lines.append(f"    {element:<14}{value}")
             else:
-                lines.append(f"    {element:<10}{value}")  # Pass raw string
+                lines.append(f"    {element:<14}{value}")  # Pass raw string
         elif isinstance(value, dict):
             val_num = value.get("value")
             if val_num is not None:
-                line = f"    {element:<10}{val_num}"
+                line = f"    {element:<14}{val_num}"
                 if "as" in value:
                     line += f" as {value['as']}"
                 if value.get("charge", False):
@@ -122,9 +134,12 @@ def build_reaction_block(reactants: List[Dict[str, Any]], reaction_num: int = 1)
             formula_lines.append(f"    {formula} 1.0")
             total_amount += float(amount)
 
-    # If no valid reactants, return empty string
+    # FAIL LOUDLY: No valid reactants is an error, not a silent no-op
     if not formula_lines:
-        return ""
+        raise InputValidationError(
+            "No valid reactants provided for REACTION block. "
+            "Each reactant must have 'formula' and 'amount' fields."
+        )
 
     # Add formula lines to reaction block
     lines.extend(formula_lines)
@@ -150,26 +165,75 @@ def build_reaction_block(reactants: List[Dict[str, Any]], reaction_num: int = 1)
     return "\n".join(lines) + "\n"
 
 
-def build_equilibrium_phases_block(phases: List[Dict[str, Any]], block_num: int = 1) -> str:
-    """Builds an EQUILIBRIUM_PHASES block."""
+def build_equilibrium_phases_block(
+    phases: List[Dict[str, Any]],
+    block_num: int = 1,
+    allow_empty: bool = False,
+    precipitation_only: bool = True,
+) -> str:
+    """
+    Builds an EQUILIBRIUM_PHASES block.
+
+    Args:
+        phases: List of phase definitions with 'name', optional 'target_si', 'initial_moles'
+        block_num: Block number for PHREEQC
+        allow_empty: If True, return empty string for no valid phases (for optional use cases).
+                     If False (default), raise InputValidationError.
+        precipitation_only: If True (default), minerals can only precipitate (initial_moles=0).
+                           If False, minerals can also dissolve (initial_moles=10).
+                           This is critical for dosing simulations where we don't want
+                           pre-equilibration with minerals that could alter pH.
+
+    Returns:
+        PHREEQC EQUILIBRIUM_PHASES block string
+
+    Raises:
+        InputValidationError: If no valid phases and allow_empty=False
+    """
+    # Default initial_moles based on mode:
+    # - precipitation_only=True (default): 0.0 - minerals can only form if supersaturated
+    # - precipitation_only=False: 10.0 - minerals can dissolve or precipitate
+    default_initial_moles = 0.0 if precipitation_only else 10.0
+
     lines = [f"EQUILIBRIUM_PHASES {block_num}"]
     valid_phases = False
     for phase_info in phases:
         name = phase_info.get("name")
         if name:
             target_si = phase_info.get("target_si", 0.0)
-            initial_moles = phase_info.get("initial_moles", 10.0)  # Usually excess unless specified
+            initial_moles = phase_info.get("initial_moles", default_initial_moles)
             lines.append(f"    {name:<15} {target_si:<8} {initial_moles}")
             valid_phases = True
+
     if not valid_phases:
-        return ""
+        if allow_empty:
+            return ""
+        raise InputValidationError(
+            "No valid phases provided for EQUILIBRIUM_PHASES block. "
+            "Each phase must have a 'name' field."
+        )
     return "\n".join(lines) + "\n"
 
 
 def build_mix_block(mix_num: int, solution_map: Dict[int, float]) -> str:
-    """Builds a MIX block. solution_map: {solution_number: fraction/volume}."""
+    """
+    Builds a MIX block.
+
+    Args:
+        mix_num: MIX block number
+        solution_map: {solution_number: fraction/volume}
+
+    Returns:
+        PHREEQC MIX block string
+
+    Raises:
+        InputValidationError: If solution_map is empty
+    """
     if not solution_map:
-        return ""
+        raise InputValidationError(
+            "Empty solution_map provided for MIX block. "
+            "At least one solution with a fraction/volume is required."
+        )
     lines = [f"MIX {mix_num}"]
     for sol_num, factor in solution_map.items():
         lines.append(f"    {sol_num:<5} {factor}")
@@ -177,7 +241,19 @@ def build_mix_block(mix_num: int, solution_map: Dict[int, float]) -> str:
 
 
 def build_gas_phase_block(gas_def: Dict[str, Any], block_num: int = 1) -> str:
-    """Builds a GAS_PHASE block."""
+    """
+    Builds a GAS_PHASE block.
+
+    Args:
+        gas_def: Gas phase definition with 'type', 'initial_components', and other parameters
+        block_num: Block number for PHREEQC
+
+    Returns:
+        PHREEQC GAS_PHASE block string
+
+    Raises:
+        GasPhaseError: If gas type is unknown or no components are defined
+    """
     lines = [f"GAS_PHASE {block_num}"]
     gas_type = gas_def.get("type", "fixed_pressure")
 
@@ -196,11 +272,20 @@ def build_gas_phase_block(gas_def: Dict[str, Any], block_num: int = 1) -> str:
         for component, moles in gas_def.get("initial_components", {}).items():
             lines.append(f"    {component:<15} {moles}")  # Moles input for fixed_volume
     else:
-        logger.error(f"Unknown gas phase type: {gas_type}")
-        return ""
+        raise GasPhaseError(
+            f"Unknown gas phase type: '{gas_type}'. Valid types are 'fixed_pressure' or 'fixed_volume'.",
+            gas_components=gas_def.get("initial_components"),
+            issue=f"Invalid type: {gas_type}"
+        )
 
-    if len(lines) <= 1:  # Only header means no components added
-        return ""
+    # FAIL LOUDLY: No gas components is an error
+    if len(lines) <= 4:  # Only header and settings, no components
+        raise GasPhaseError(
+            "No gas components defined in GAS_PHASE block. "
+            "At least one component is required in 'initial_components'.",
+            gas_components=gas_def.get("initial_components"),
+            issue="No components defined"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -219,6 +304,16 @@ def build_surface_block(surface_def: Dict[str, Any], block_num: int = 1) -> str:
         Hfo_s  0.05 600  1.0   # strong site
         -equilibrate with solution 1
         -no_edl                  # optional flags
+
+    Args:
+        surface_def: Surface definition with sites, densities, etc.
+        block_num: Block number for PHREEQC
+
+    Returns:
+        PHREEQC SURFACE block string
+
+    Raises:
+        SurfaceDefinitionError: If surface definition is invalid or missing required fields
     """
     # Check for different input formats and process accordingly
 
@@ -272,6 +367,10 @@ def build_surface_block(surface_def: Dict[str, Any], block_num: int = 1) -> str:
         equilibrate_num = surface_def.get("equilibrate_with_solution_number", 1)
         lines.append(f"    -equilibrate {equilibrate_num}")
 
+        # Track valid sites for error reporting
+        valid_site_count = 0
+        skipped_sites = []
+
         # Add site definitions
         for site_info in sites_info:
             # Handle different possible formats for site info
@@ -287,17 +386,21 @@ def build_surface_block(surface_def: Dict[str, Any], block_num: int = 1) -> str:
                 if name and moles is not None and area is not None and mass is not None:
                     # Full format: name moles specific_area mass
                     lines.append(f"    {name}  {moles}  {area}  {mass}")
+                    valid_site_count += 1
                 elif name and moles is not None:
                     # Simplified format: just name and moles
                     lines.append(f"    {name}  {moles}")
+                    valid_site_count += 1
                 elif name:
                     # Minimal format: just the name with default values
                     lines.append(f"    {name}  0.01")  # Default site density
+                    valid_site_count += 1
                 else:
-                    logger.warning(f"Skipping site info missing required name: {site_info}")
+                    skipped_sites.append(str(site_info))
             elif isinstance(site_info, str):
                 # Just a site name string
                 lines.append(f"    {site_info}  0.01")  # Default site density
+                valid_site_count += 1
 
         # Add any additional options
         if surface_def.get("no_edl", False):
@@ -307,22 +410,30 @@ def build_surface_block(surface_def: Dict[str, Any], block_num: int = 1) -> str:
         if surface_def.get("only_counter_ions", False):
             lines.append("    -only_counter_ions")
 
-        # Create the block if we have at least one site definition
-        if len(lines) > 2:  # More than just SURFACE and -equilibrate lines
-            # Add SURFACE_MASTER_SPECIES and SURFACE_SPECIES blocks if provided
-            full_block = ""
-            if surface_def.get("sites_block_string"):
-                full_block += f"{surface_def['sites_block_string'].strip()}\n\n"
-            full_block += "\n".join(lines) + "\n"
-            return full_block
-        else:
-            logger.warning("No valid site definitions found for SURFACE block")
-            return ""
+        # FAIL LOUDLY: No valid site definitions is an error
+        if valid_site_count == 0:
+            raise SurfaceDefinitionError(
+                "No valid site definitions found for SURFACE block. "
+                "Each site must have at least a 'name' field.",
+                missing_fields=["name"] if skipped_sites else None,
+                invalid_fields={"skipped_sites": ", ".join(skipped_sites)} if skipped_sites else None
+            )
+
+        # Add SURFACE_MASTER_SPECIES and SURFACE_SPECIES blocks if provided
+        full_block = ""
+        if surface_def.get("sites_block_string"):
+            full_block += f"{surface_def['sites_block_string'].strip()}\n\n"
+        full_block += "\n".join(lines) + "\n"
+        return full_block
 
     # Case 3: No valid surface definition
     else:
-        logger.error("Invalid surface definition provided")
-        return ""
+        raise SurfaceDefinitionError(
+            "Invalid surface definition provided. "
+            "Provide either 'surface_block_string' for raw input, or "
+            "'sites'/'sites_info' for structured input.",
+            missing_fields=["surface_block_string", "sites", "sites_info"]
+        )
 
 
 def build_kinetics_block(kinetics_def: Dict[str, Any], time_def: Dict[str, Any], block_num: int = 1) -> Tuple[str, str]:
@@ -340,154 +451,164 @@ def build_kinetics_block(kinetics_def: Dict[str, Any], time_def: Dict[str, Any],
 
     Returns:
         Tuple of (rates_string, kinetics_string)
+
+    Raises:
+        KineticsDefinitionError: If kinetics definition is invalid or incomplete
     """
-    import logging
+    # Step 1: Generate RATES block
+    rates_str = ""
 
-    logger = logging.getLogger(__name__)
+    # Check if the user provided a raw RATES block
+    if kinetics_def.get("rates_block_string"):
+        rates_str = kinetics_def.get("rates_block_string", "")
 
-    try:
-        # Step 1: Generate RATES block
-        rates_str = ""
+        # Ensure the block starts with "RATES" as required by PHREEQC
+        if not rates_str.strip().upper().startswith("RATES"):
+            rates_str = f"RATES\n{rates_str}"
 
-        # Check if the user provided a raw RATES block
-        if kinetics_def.get("rates_block_string"):
-            rates_str = kinetics_def.get("rates_block_string", "")
+        logger.debug(f"Using raw RATES block string: {rates_str[:100]}...")
 
-            # Ensure the block starts with "RATES" as required by PHREEQC
-            if not rates_str.strip().upper().startswith("RATES"):
-                rates_str = f"RATES\n{rates_str}"
+    # Check for structured rate definitions to generate the RATES block
+    elif kinetics_def.get("rates") and isinstance(kinetics_def["rates"], list):
+        rates_lines = ["RATES"]
+        valid_rates = 0
 
-            logger.debug(f"Using raw RATES block string: {rates_str[:100]}...")
+        for rate_def in kinetics_def["rates"]:
+            if isinstance(rate_def, dict):
+                name = rate_def.get("name")
+                rate_law = rate_def.get("rate_law", "")
 
-        # Check for structured rate definitions to generate the RATES block
-        elif kinetics_def.get("rates") and isinstance(kinetics_def["rates"], list):
-            rates_lines = ["RATES"]
+                if name and rate_law:
+                    # Format the rate law with proper indentation
+                    rates_lines.append(f"\n{name}")
 
-            for rate_def in kinetics_def["rates"]:
-                if isinstance(rate_def, dict):
-                    name = rate_def.get("name")
-                    rate_law = rate_def.get("rate_law", "")
+                    # Ensure the START and END are in the rate law, add if missing
+                    if "START" not in rate_law:
+                        rates_lines.append("-start")
 
-                    if name and rate_law:
-                        # Format the rate law with proper indentation
-                        rates_lines.append(f"\n{name}")
+                    # Add the rate law code with indentation
+                    if isinstance(rate_law, str):
+                        for line in rate_law.splitlines():
+                            rates_lines.append(f"    {line}")
 
-                        # Ensure the START and END are in the rate law, add if missing
-                        if "START" not in rate_law:
-                            rates_lines.append("-start")
+                    if "END" not in rate_law and "-end" not in rate_law:
+                        rates_lines.append("-end")
 
-                        # Add the rate law code with indentation
-                        if isinstance(rate_law, str):
-                            for line in rate_law.splitlines():
-                                rates_lines.append(f"    {line}")
+                    valid_rates += 1
 
-                        if "END" not in rate_law and "-end" not in rate_law:
-                            rates_lines.append("-end")
+        if valid_rates > 0:
+            rates_str = "\n".join(rates_lines)
+            logger.debug(f"Generated RATES block from structured data: {rates_str[:100]}...")
 
-            if len(rates_lines) > 1:  # More than just the RATES header
-                rates_str = "\n".join(rates_lines)
-                logger.debug(f"Generated RATES block from structured data: {rates_str[:100]}...")
+    logger.debug(f"Complete RATES block: {rates_str}")
 
-        logger.debug(f"Complete RATES block: {rates_str}")
+    # Step 2: Generate KINETICS block
+    kinetics_lines = [f"KINETICS {block_num}"]
+    reaction_count = 0
 
-        # Step 2: Generate KINETICS block
-        kinetics_lines = [f"KINETICS {block_num}"]
+    # Check if the user provided a raw KINETICS block
+    if kinetics_def.get("kinetics_block_string"):
+        kinetics_inner_str = kinetics_def.get("kinetics_block_string", "")
+        if kinetics_inner_str:
+            # Add indentation if missing from user input
+            kinetics_lines.extend([f"    {line.strip()}" for line in kinetics_inner_str.strip().splitlines()])
+            reaction_count = 1  # Assume at least one reaction in raw input
+            logger.debug(f"Using raw KINETICS block string")
 
-        # Check if the user provided a raw KINETICS block
-        if kinetics_def.get("kinetics_block_string"):
-            kinetics_inner_str = kinetics_def.get("kinetics_block_string", "")
-            if kinetics_inner_str:
-                # Add indentation if missing from user input
-                kinetics_lines.extend([f"    {line.strip()}" for line in kinetics_inner_str.strip().splitlines()])
-                logger.debug(f"Using raw KINETICS block string")
+    # Check for structured reaction definitions to generate the KINETICS block
+    elif kinetics_def.get("reactions") and isinstance(kinetics_def["reactions"], list):
+        for reaction in kinetics_def["reactions"]:
+            if isinstance(reaction, dict):
+                name = reaction.get("name")
+                formula = reaction.get("formula")
+                parameters = reaction.get("parameters", {})
+                custom_line = reaction.get("custom_kinetics_line")
 
-        # Check for structured reaction definitions to generate the KINETICS block
-        elif kinetics_def.get("reactions") and isinstance(kinetics_def["reactions"], list):
-            for reaction in kinetics_def["reactions"]:
-                if isinstance(reaction, dict):
-                    name = reaction.get("name")
-                    formula = reaction.get("formula")
-                    parameters = reaction.get("parameters", {})
-                    custom_line = reaction.get("custom_kinetics_line")
+                if name:
+                    # If there's a custom_kinetics_line, use it directly
+                    if custom_line:
+                        kinetics_lines.append(f"    {custom_line}")
+                    else:
+                        # Generate a standard kinetics entry
+                        kinetics_lines.append(f"    {name}")
+                        if formula:
+                            # Handle either string or dict formats for formula
+                            if isinstance(formula, str):
+                                kinetics_lines.append(f"        -formula {formula}")
+                            elif isinstance(formula, dict):
+                                # Convert dict to formatted string
+                                formula_parts = []
+                                for elem, coef in formula.items():
+                                    formula_parts.append(f"{elem} {coef}")
+                                formula_str = " ".join(formula_parts)
+                                kinetics_lines.append(f"        -formula {formula_str}")
 
-                    if name:
-                        # If there's a custom_kinetics_line, use it directly
-                        if custom_line:
-                            kinetics_lines.append(f"    {custom_line}")
-                        else:
-                            # Generate a standard kinetics entry
-                            kinetics_lines.append(f"    {name}")
-                            if formula:
-                                # Handle either string or dict formats for formula
-                                if isinstance(formula, str):
-                                    kinetics_lines.append(f"        -formula {formula}")
-                                elif isinstance(formula, dict):
-                                    # Convert dict to formatted string
-                                    formula_parts = []
-                                    for elem, coef in formula.items():
-                                        formula_parts.append(f"{elem} {coef}")
-                                    formula_str = " ".join(formula_parts)
-                                    kinetics_lines.append(f"        -formula {formula_str}")
+                        # Add parameters
+                        if parameters:
+                            for param_name, param_value in parameters.items():
+                                kinetics_lines.append(f"        -{param_name} {param_value}")
 
-                            # Add parameters
-                            if parameters:
-                                for param_name, param_value in parameters.items():
-                                    kinetics_lines.append(f"        -{param_name} {param_value}")
+                    reaction_count += 1
 
-            logger.debug(f"Generated KINETICS block from structured data")
+        logger.debug(f"Generated KINETICS block from structured data")
 
-        # If no kinetics blocks were defined, we can't proceed
-        if len(kinetics_lines) <= 1:  # Just the header
-            logger.error("No kinetics reactions defined")
-            return "", ""
+    # FAIL LOUDLY: No kinetics reactions defined is an error
+    if reaction_count == 0:
+        missing_fields = []
+        if not kinetics_def.get("kinetics_block_string"):
+            missing_fields.append("kinetics_block_string")
+        if not kinetics_def.get("reactions"):
+            missing_fields.append("reactions")
 
-        # Step 3: Add time steps
-        # Determine time steps format based on available information
+        raise KineticsDefinitionError(
+            "No kinetics reactions defined. Provide either 'kinetics_block_string' "
+            "for raw PHREEQC input, or 'reactions' list with structured definitions.",
+            missing_fields=missing_fields
+        )
 
-        # Try to get time step information from time_def
-        time_info_added = False
+    # Step 3: Add time steps
+    # Determine time steps format based on available information
 
-        # Case 1: Raw time values list
-        if "time_values" in time_def and time_def.get("time_values"):
-            time_values = time_def.get("time_values", [])
-            time_units = time_def.get("units", "seconds")
+    # Try to get time step information from time_def
+    time_info_added = False
 
-            if time_values and isinstance(time_values, list) and len(time_values) > 0:
-                time_values_str = " ".join(map(str, time_values))
-                kinetics_lines.append(f"    -steps {time_values_str} {time_units}")
-                logger.debug(f"Added time steps from raw values: {time_values_str} {time_units}")
-                time_info_added = True
+    # Case 1: Raw time values list
+    if "time_values" in time_def and time_def.get("time_values"):
+        time_values = time_def.get("time_values", [])
+        time_units = time_def.get("units", "seconds")
 
-        # Case 2: Count and duration parameters - both needed
-        if not time_info_added and "count" in time_def and "duration" in time_def:
-            count = time_def.get("count")
-            duration = time_def.get("duration")
-
-            if count and duration and count > 0 and duration > 0:
-                units = time_def.get("duration_units", "seconds")
-                # Generate equal time steps
-                step_size = duration / count
-                kinetics_lines.append(f"    -steps {step_size} {units} in {count} steps")
-                logger.debug(f"Added time steps from duration/count: {step_size} {units} in {count} steps")
-                time_info_added = True
-
-        # Case 3: Fallback - use default time step if no valid time information
-        if not time_info_added:
-            logger.warning("Using default time step of 3600 seconds")
-            kinetics_lines.append("    -steps 3600 seconds")
+        if time_values and isinstance(time_values, list) and len(time_values) > 0:
+            time_values_str = " ".join(map(str, time_values))
+            kinetics_lines.append(f"    -steps {time_values_str} {time_units}")
+            logger.debug(f"Added time steps from raw values: {time_values_str} {time_units}")
             time_info_added = True
 
-        # Finalize blocks with newlines
-        rates_str_final = rates_str.strip() + "\n\n" if rates_str else ""
-        kinetics_str_final = "\n".join(kinetics_lines) + "\n"
+    # Case 2: Count and duration parameters - both needed
+    if not time_info_added and "count" in time_def and "duration" in time_def:
+        count = time_def.get("count")
+        duration = time_def.get("duration")
 
-        logger.debug(f"Complete KINETICS block: {kinetics_str_final}")
+        if count and duration and count > 0 and duration > 0:
+            units = time_def.get("duration_units", "seconds")
+            # Generate equal time steps
+            step_size = duration / count
+            kinetics_lines.append(f"    -steps {step_size} {units} in {count} steps")
+            logger.debug(f"Added time steps from duration/count: {step_size} {units} in {count} steps")
+            time_info_added = True
 
-        return rates_str_final, kinetics_str_final
+    # Case 3: Fallback - use default time step if no valid time information
+    if not time_info_added:
+        logger.warning("Using default time step of 3600 seconds")
+        kinetics_lines.append("    -steps 3600 seconds")
+        time_info_added = True
 
-    except Exception as e:
-        logger.error(f"Error building kinetics block: {e}", exc_info=True)
-        return "", ""
+    # Finalize blocks with newlines
+    rates_str_final = rates_str.strip() + "\n\n" if rates_str else ""
+    kinetics_str_final = "\n".join(kinetics_lines) + "\n"
+
+    logger.debug(f"Complete KINETICS block: {kinetics_str_final}")
+
+    return rates_str_final, kinetics_str_final
 
 
 def build_selected_output_block(

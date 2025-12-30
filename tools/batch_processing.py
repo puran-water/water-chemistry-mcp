@@ -9,6 +9,7 @@ Supports:
 """
 
 import asyncio
+import copy
 from typing import Dict, Any, List, Optional, Tuple
 import logging
 import numpy as np
@@ -17,6 +18,59 @@ from .chemical_addition import simulate_chemical_addition
 from .solution_speciation import calculate_solution_speciation
 
 logger = logging.getLogger(__name__)
+
+
+def reconstruct_solution_from_result(
+    result: Dict[str, Any], original_solution: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Reconstruct a full solution object from PHREEQC calculation results.
+
+    This is critical for treatment trains where the output of one step
+    becomes the input for the next step. The solution_summary alone
+    does not contain the analysis field required for subsequent calculations.
+
+    Args:
+        result: PHREEQC calculation result containing element_totals_molality
+        original_solution: Original solution object to preserve database and units
+
+    Returns:
+        Complete solution object suitable for use as input to next calculation
+    """
+    # Extract element concentrations from result (in mol/kg)
+    element_totals = result.get("element_totals_molality", {})
+
+    # Build analysis dict from element totals
+    # PHREEQC returns mol/kg (molality), convert to mmol/L for consistency
+    # Assuming density ~1 kg/L for dilute solutions
+    analysis = {}
+    for element, molality in element_totals.items():
+        if molality and molality > 0:
+            # Convert mol/kg to mmol/L (multiply by 1000)
+            analysis[element] = molality * 1000
+
+    # Get pH and pe from solution_summary
+    solution_summary = result.get("solution_summary", {})
+
+    # Reconstruct complete solution
+    new_solution = {
+        "units": "mmol/L",  # Standardized output units
+        "analysis": analysis,
+        "database": original_solution.get("database", "minteq.dat"),
+        "temperature_celsius": solution_summary.get(
+            "temperature_celsius", original_solution.get("temperature_celsius", 25.0)
+        ),
+    }
+
+    # Include pH if available (important for next step's equilibrium)
+    if "pH" in solution_summary:
+        new_solution["pH"] = solution_summary["pH"]
+
+    # Include pe if available
+    if "pe" in solution_summary:
+        new_solution["pe"] = solution_summary["pe"]
+
+    return new_solution
 
 
 async def batch_process_scenarios(input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -50,9 +104,10 @@ async def batch_process_scenarios(input_data: Dict[str, Any]) -> Dict[str, Any]:
         batch = scenarios[i : i + parallel_limit]
 
         # Create tasks for this batch
+        # CRITICAL FIX: Deep copy base_solution for each task to prevent race conditions
         tasks = []
         for scenario in batch:
-            task = process_single_scenario(base_solution, scenario)
+            task = process_single_scenario(copy.deepcopy(base_solution), scenario)
             tasks.append(task)
 
         # Run batch in parallel
@@ -130,8 +185,8 @@ async def process_single_scenario(base_solution: Dict[str, Any], scenario: Dict[
 
         sweep_results = []
         for value in values:
-            # Modify base solution
-            modified_solution = base_solution.copy()
+            # CRITICAL FIX: Deep copy to avoid mutating base_solution across iterations
+            modified_solution = copy.deepcopy(base_solution)
             if parameter in ["pH", "pe", "temperature_celsius"]:
                 modified_solution[parameter] = value
             else:
@@ -148,16 +203,22 @@ async def process_single_scenario(base_solution: Dict[str, Any], scenario: Dict[
 
     elif scenario_type == "treatment_train":
         # Sequential treatment steps
-        current_solution = base_solution
+        current_solution = copy.deepcopy(base_solution)  # Deep copy to avoid mutation
         train_results = []
 
         for step in scenario.get("steps", []):
             step_result = await process_treatment_step(current_solution, step)
             train_results.append(step_result)
 
-            # Use output as input for next step
-            current_solution = step_result.get("solution_summary", current_solution)
+            # CRITICAL FIX: Reconstruct full solution from result, not just summary
+            # The solution_summary lacks the 'analysis' field required for subsequent steps
+            if "error" not in step_result:
+                current_solution = reconstruct_solution_from_result(step_result, current_solution)
+            else:
+                # On error, keep current solution but log warning
+                logger.warning(f"Treatment step failed, using previous solution state: {step_result.get('error')}")
 
+        # Return final reconstructed solution, not just summary
         return {"train_results": train_results, "final_solution": current_solution}
 
     elif scenario_type in ("ph_sweep", "temperature_sweep", "dose_response"):
@@ -167,8 +228,6 @@ async def process_single_scenario(base_solution: Dict[str, Any], scenario: Dict[
             values = scenario.get("values")
             if values is None and all(k in scenario for k in ("start", "stop", "step")):
                 try:
-                    import numpy as np
-
                     values = list(np.arange(scenario["start"], scenario["stop"] + 1e-9, scenario["step"]))
                 except Exception:
                     values = [scenario["start"], scenario["stop"]]
@@ -176,7 +235,8 @@ async def process_single_scenario(base_solution: Dict[str, Any], scenario: Dict[
                 raise ValueError("ph_sweep requires 'values' or 'start'/'stop'/'step'")
             sweep_results = []
             for value in values:
-                modified_solution = dict(base_solution)
+                # CRITICAL FIX: Deep copy to avoid mutation
+                modified_solution = copy.deepcopy(base_solution)
                 modified_solution[parameter] = value
                 result = await calculate_solution_speciation(modified_solution)
                 sweep_results.append({parameter: value, "result": result})
@@ -186,8 +246,6 @@ async def process_single_scenario(base_solution: Dict[str, Any], scenario: Dict[
             values = scenario.get("values")
             if values is None and all(k in scenario for k in ("start", "stop", "step")):
                 try:
-                    import numpy as np
-
                     values = list(np.arange(scenario["start"], scenario["stop"] + 1e-9, scenario["step"]))
                 except Exception:
                     values = [scenario["start"], scenario["stop"]]
@@ -195,7 +253,8 @@ async def process_single_scenario(base_solution: Dict[str, Any], scenario: Dict[
                 raise ValueError("temperature_sweep requires 'values' or 'start'/'stop'/'step'")
             sweep_results = []
             for value in values:
-                modified_solution = dict(base_solution)
+                # CRITICAL FIX: Deep copy to avoid mutation
+                modified_solution = copy.deepcopy(base_solution)
                 modified_solution[parameter] = value
                 result = await calculate_solution_speciation(modified_solution)
                 sweep_results.append({parameter: value, "result": result})
@@ -572,23 +631,26 @@ async def calculate_lime_softening_dose(
             logger.error(f"Dose {dose:.3f} failed: {e}")
 
     if best_result:
+        # Calculate achieved hardness
+        achieved_hardness = (
+            best_result["element_totals_molality"]["Ca"] + best_result["element_totals_molality"]["Mg"]
+        ) * 100000
+
+        # CRITICAL FIX: Prevent division by zero when initial == target hardness
+        hardness_to_remove = initial_hardness - target_hardness_mg_caco3
+        if abs(hardness_to_remove) < 1e-6:
+            # No removal needed, efficiency is N/A or 100% if already at target
+            removal_efficiency = 100.0 if abs(initial_hardness - achieved_hardness) < 1e-6 else None
+        else:
+            hardness_removed = initial_hardness - achieved_hardness
+            removal_efficiency = (hardness_removed / hardness_to_remove) * 100
+
         # Add optimization details to result
         best_result["optimization_summary"] = {
             "optimal_dose_mmol": best_dose,
             "target_hardness_mg_caco3": target_hardness_mg_caco3,
-            "achieved_hardness_mg_caco3": (
-                best_result["element_totals_molality"]["Ca"] + best_result["element_totals_molality"]["Mg"]
-            )
-            * 100000,
-            "hardness_removal_efficiency": (
-                (
-                    initial_hardness
-                    - (best_result["element_totals_molality"]["Ca"] + best_result["element_totals_molality"]["Mg"])
-                    * 100000
-                )
-                / (initial_hardness - target_hardness_mg_caco3)
-            )
-            * 100,
+            "achieved_hardness_mg_caco3": achieved_hardness,
+            "hardness_removal_efficiency": removal_efficiency,
         }
         logger.info(f"Optimal lime dose: {best_dose:.3f} mmol/L")
         return best_result
@@ -735,12 +797,27 @@ async def optimize_phosphorus_removal(
                     if final_ph is None:
                         final_ph = float("inf")
 
-                    # Check if this is better
+                    # Check if this is better using proper weighted scalarization
                     p_diff = abs(p_final_mg - target_p_mg_l)
                     ph_diff = abs(final_ph - target_ph) if (target_ph is not None and final_ph != float("inf")) else 0
 
-                    # Combined score (prioritize P removal)
-                    if p_diff < best_p_diff or (p_diff <= best_p_diff * 1.2 and ph_diff < best_ph_diff):
+                    # CRITICAL FIX: Use proper weighted objective instead of ad-hoc 1.2x multiplier
+                    # Weight P removal (primary objective) at 1.0, pH at 0.5 (secondary)
+                    # Normalize both objectives to comparable scales before weighting
+                    p_weight = 1.0
+                    ph_weight = 0.5
+                    # Normalize: P target typically 0.1-5 mg/L, pH typically 6-8 range
+                    p_normalized = p_diff / max(target_p_mg_l, 0.1)  # Relative to target
+                    ph_normalized = ph_diff / 2.0  # Normalize to ~0-1 range for typical pH adjustments
+                    combined_score = p_weight * p_normalized + ph_weight * ph_normalized
+
+                    # Also compute best combined score for comparison
+                    best_p_normalized = best_p_diff / max(target_p_mg_l, 0.1)
+                    best_ph_normalized = best_ph_diff / 2.0
+                    best_combined_score = p_weight * best_p_normalized + ph_weight * best_ph_normalized
+
+                    # Accept if combined weighted score is better
+                    if combined_score < best_combined_score:
                         best_p_diff = p_diff
                         best_ph_diff = ph_diff
                         best_result = result

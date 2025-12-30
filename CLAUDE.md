@@ -3,16 +3,40 @@
 ## Overview
 AI agent with access to Water Chemistry MCP Server for industrial wastewater treatment modeling using PHREEQC. **CRITICAL**: Uses PHREEQC notation, not standard chemical formulas.
 
-### Scientific Integrity & Engineering Efficiency ✅ **COMPLETE**
-- **Membrane scaling analysis removed** - was entirely heuristics-based and scientifically unsound
-- **Full database mineral lists now default** - prevents missing precipitate with comprehensive modeling
-- **Comprehensive precipitation modeling** - ~50-200 minerals considered vs previous ~10
-- **Heuristic precipitation estimation eliminated** - no more fabricated data when PHREEQC desaturation fails
-- **TDS calculations improved** - species-based accuracy replacing simplified element multiplication
-- **Composite parameters use PHREEQC-native calculations** - total hardness, carbonate alkalinity via SELECTED_OUTPUT
-- **Smart optimization bounds** - stoichiometry used internally for efficient search ranges (results are PHREEQC-only)
-- **Cost calculations eliminated** - exclusively technical focus, no economic estimates
-- **Enhanced optimization tools enabled** - all 12 tools now available with PHREEQC-only results
+### Server: `water_chemistry_mcp`
+
+**16 Registered Tools:**
+
+**Core Analysis (5 tools):**
+1. `calculate_solution_speciation` - Water quality analysis
+2. `simulate_chemical_addition` - Treatment simulation
+3. `simulate_solution_mixing` - Stream blending
+4. `predict_scaling_potential` - Scaling risk assessment
+5. `batch_process_scenarios` - Parallel processing with optimization scenario types
+
+**Dosing & Database (2 tools):**
+6. `calculate_dosing_requirement` - Binary search for target pH/hardness/SI
+7. `query_thermodynamic_database` - Query minerals, elements, species
+
+**Advanced PHREEQC Features (4 tools):**
+8. `simulate_kinetic_reaction` - Time-dependent reaction modeling
+9. `simulate_gas_phase_interaction` - Gas equilibria (CO2 stripping, O2 transfer)
+10. `simulate_redox_adjustment` - Redox potential (pe/Eh) control
+11. `simulate_surface_interaction` - Surface complexation modeling
+
+**Optimization Tools (5 tools):**
+12. `generate_lime_softening_curve` - Complete dose-response curves
+13. `calculate_lime_softening_dose` - Optimal lime softening dose
+14. `optimize_phosphorus_removal` - P removal with coagulant selection
+15. `calculate_dosing_requirement_enhanced` - Multi-objective dosing optimization
+16. `optimize_multi_reagent_treatment` - Multi-reagent with 4 strategies
+
+### Scientific Integrity & Engineering Efficiency
+- **PHREEQC thermodynamics only** - All results from validated PHREEQC calculations
+- **Comprehensive precipitation modeling** - Full database mineral lists by default
+- **Smart optimization bounds** - Stoichiometry used internally for efficient search ranges
+- **Technical focus** - No economic estimates, purely scientific results
+- **USGS PHREEQC support** - Subprocess mode for full USGS database compatibility
 
 ## Core Tools
 
@@ -74,24 +98,7 @@ Model chemical treatment with precipitation.
 }
 ```
 
-### 3. calculate_dosing_requirement
-Find optimal dose for target conditions.
-
-**Required format:**
-```json
-{
-    "initial_solution": {
-        "units": "mmol/L", 
-        "analysis": {"Ca": 2.0, "Mg": 1.0, "Alkalinity": 1.8},
-        "database": "minteq.dat"
-    },
-    "target_condition": {"parameter": "pH", "value": 8.5},
-    "reagent": {"formula": "NaOH"},
-    "database": "minteq.dat"
-}
-```
-
-### 4. simulate_solution_mixing
+### 3. simulate_solution_mixing
 Blend multiple water streams.
 
 **Required format:**
@@ -111,49 +118,22 @@ Blend multiple water streams.
 }
 ```
 
-### 5. predict_scaling_potential
-Assess precipitation/scaling risks. **IMPORTANT**: Membrane scaling analysis has been removed (was heuristics-based). Use standard thermodynamic scaling analysis only.
+### 4. predict_scaling_potential
+Assess precipitation/scaling risks using thermodynamic saturation indices.
 
-### 6. generate_calculation_sheet
-Create engineering documentation.
+### 5. batch_process_scenarios
+**USE THIS for 3+ similar calculations** - Processes multiple scenarios in parallel.
 
-**Required format:**
-```json
-{
-    "calculation_type": "lime_softening_design",
-    "calculation_data": {
-        "raw_water": {...},
-        "treatment_results": {...},
-        "design_parameters": {...}
-    },
-    "project_info": {
-        "title": "Project Title",
-        "engineer": "Engineer Name",
-        "date": "2025-06-11",
-        "project_number": "PRJ-001"
-    }
-}
-```
-
-### 7. batch_process_scenarios ⭐ **ENHANCED**
-**USE THIS for 3+ similar calculations** - Processes multiple scenarios in parallel with advanced optimization.
-
-## Enhanced Optimization Tools ⭐ **NEWLY ENABLED**
-
-### 8. calculate_dosing_requirement_enhanced
-**Multi-objective dosing optimization** with 6 async algorithms (differential evolution, Nelder-Mead, adaptive, etc.)
-
-### 9. generate_lime_softening_curve  
-**Complete dose-response curves** for lime softening - single call replaces 10+ sequential calculations
-
-### 10. calculate_lime_softening_dose
-**Specialized lime softening optimization** with optional soda ash for enhanced softening
-
-### 11. optimize_phosphorus_removal
-**P removal optimization** with coagulant selection and pH control
-
-### 12. optimize_multi_reagent_treatment
-**Advanced multi-reagent optimization** with 4 strategies: Pareto front, weighted sum, sequential, robust
+**Supported scenario types:**
+- `chemical_addition` - Standard chemical treatment
+- `parameter_sweep` - Sweep a parameter range
+- `ph_sweep` / `temperature_sweep` - Specialized sweeps
+- `dose_response` - Dose-response curves
+- `treatment_train` - Sequential treatment steps
+- `phosphorus_optimization` - P removal optimization
+- `lime_softening_optimization` - Lime softening optimization
+- `multi_reagent_optimization` - Multi-chemical optimization (max 2 reagents)
+- `alternative_comparison` - Compare treatment alternatives
 
 **CRITICAL: base_solution MUST be wrapped in proper format:**
 ```json
@@ -176,6 +156,175 @@ Create engineering documentation.
     "parallel_limit": 10
 }
 ```
+
+### 6. calculate_dosing_requirement
+Find optimal dose to achieve target pH, hardness, or saturation index.
+
+**Required format:**
+```json
+{
+    "initial_solution": {
+        "units": "mmol/L",
+        "analysis": {"Ca": 2.0, "Mg": 1.0, "Alkalinity": 1.8},
+        "database": "minteq.v4.dat",
+        "ph": 7.5
+    },
+    "target_condition": {"parameter": "pH", "value": 9.0},
+    "reagent": {"formula": "NaOH"},
+    "max_iterations": 30,
+    "tolerance": 0.1,
+    "allow_precipitation": true,
+    "database": "minteq.v4.dat"
+}
+```
+
+**Supported target parameters:**
+- `pH` - Target pH value
+- `SI_Calcite` - Saturation index for a mineral
+- `total_hardness` - Total hardness (mg/L as CaCO3)
+- `alkalinity` - Alkalinity (mg/L as CaCO3)
+
+**Database Notes:**
+- Use `minteq.v4.dat` for lime softening (has Brucite for Mg precipitation)
+- `phreeqc.dat` does NOT have Mg(OH)2 as a phase - no Mg precipitation
+
+### 7. query_thermodynamic_database
+Query available minerals, elements, and species in a PHREEQC database.
+
+### 8. simulate_kinetic_reaction
+Model time-dependent reactions (requires kinetic rate definitions).
+
+### 9. simulate_gas_phase_interaction
+Model gas-solution equilibria (CO2 stripping, O2 transfer, CH4).
+
+### 10. simulate_redox_adjustment
+Adjust solution redox potential (pe/Eh) or equilibrate with redox couple.
+
+### 11. simulate_surface_interaction
+Model surface complexation (adsorption on minerals, ion exchange).
+
+---
+
+## Optimization Tools
+
+### 12. generate_lime_softening_curve
+Generate a complete dose-response curve for lime softening in a single call.
+
+**Required format:**
+```json
+{
+    "initial_water": {
+        "units": "mmol/L",
+        "analysis": {"Ca": 2.5, "Mg": 1.0, "Alkalinity": 3.0},
+        "pH": 7.5,
+        "database": "minteq.v4.dat"
+    },
+    "lime_doses": [0.5, 1, 2, 3, 4, 5, 6, 7, 8],
+    "database": "minteq.v4.dat"
+}
+```
+
+**Returns:**
+- `curve_data`: List of points with pH, hardness, precipitate at each dose
+- `optimal_dose`: Interpolated dose for target hardness (85 mg/L as CaCO3)
+
+### 13. calculate_lime_softening_dose
+Calculate optimal lime dose for target hardness with smart bounds.
+
+**Required format:**
+```json
+{
+    "initial_water": {
+        "units": "mmol/L",
+        "analysis": {"Ca": 3.0, "Mg": 1.5, "Alkalinity": 4.0},
+        "pH": 7.5,
+        "database": "minteq.v4.dat"
+    },
+    "target_hardness_mg_caco3": 100,
+    "database": "minteq.v4.dat"
+}
+```
+
+### 14. optimize_phosphorus_removal
+Optimize coagulant dose for phosphorus removal with optional pH control.
+
+**Required format:**
+```json
+{
+    "initial_water": {
+        "units": "mmol/L",
+        "analysis": {"Ca": 1.0, "Mg": 0.5, "Alkalinity": 2.0, "P": 0.1},
+        "pH": 7.0,
+        "database": "minteq.v4.dat"
+    },
+    "target_p_mg_l": 0.5,
+    "coagulant": "FeCl3",
+    "target_ph": 6.5,
+    "database": "minteq.v4.dat"
+}
+```
+
+**Supported coagulants:** FeCl3, FeSO4, Al2(SO4)3
+
+### 15. calculate_dosing_requirement_enhanced
+Multi-objective dosing optimization with multiple reagents and objectives.
+
+**Required format:**
+```json
+{
+    "initial_solution": {
+        "units": "mmol/L",
+        "analysis": {"Ca": 2.0, "Mg": 1.0, "Alkalinity": 2.5},
+        "pH": 7.0,
+        "database": "minteq.v4.dat"
+    },
+    "reagents": [
+        {"formula": "Ca(OH)2", "min_dose": 0.0, "max_dose": 5.0},
+        {"formula": "Na2CO3", "min_dose": 0.0, "max_dose": 3.0}
+    ],
+    "objectives": [
+        {"parameter": "pH", "value": 10.5, "weight": 0.5},
+        {"parameter": "total_hardness", "value": 80, "weight": 0.5}
+    ],
+    "optimization_method": "grid_search",
+    "database": "minteq.v4.dat"
+}
+```
+
+**Supported parameters:** pH, pe, total_hardness, residual_phosphorus, alkalinity, SI
+
+### 16. optimize_multi_reagent_treatment
+Advanced multi-reagent optimization with 4 strategy options.
+
+**Required format:**
+```json
+{
+    "initial_water": {
+        "units": "mmol/L",
+        "analysis": {"Ca": 2.0, "Mg": 1.0, "Alkalinity": 2.5},
+        "pH": 7.0,
+        "database": "minteq.v4.dat"
+    },
+    "reagents": [
+        {"formula": "Ca(OH)2", "min_dose": 0.5, "max_dose": 5.0}
+    ],
+    "objectives": [
+        {"parameter": "pH", "value": 10.5, "weight": 0.5},
+        {"parameter": "total_hardness", "value": 80, "weight": 0.5}
+    ],
+    "optimization_strategy": "weighted_sum",
+    "grid_points": 10,
+    "database": "minteq.v4.dat"
+}
+```
+
+**Available strategies:**
+- `weighted_sum` - Single optimal via weighted scalarization (default)
+- `pareto_front` - Non-dominated solutions for multi-objective trade-offs
+- `sequential` - Optimize reagents one at a time
+- `robust` - Best worst-case performance
+
+---
 
 ## PHREEQC Notation (MUST USE)
 
@@ -348,80 +497,9 @@ NaOH, Ca(OH)2, Na2CO3, FeCl3, Al2(SO4)3, H2SO4, HCl, NaOCl
 }
 ```
 
-## Enhanced Optimization Workflows ⭐ **NEW**
+## Workflow Examples
 
-### Multi-Objective Optimization
-```python
-# Enhanced dosing with multiple objectives
-result = calculate_dosing_requirement_enhanced({
-    "initial_solution": {
-        "units": "mmol/L",
-        "analysis": {"Ca": 2.0, "Mg": 1.0, "Alkalinity": 1.8, "P": 0.1},
-        "database": "minteq.dat"
-    },
-    "reagents": [{"formula": "FeCl3"}],
-    "objectives": [
-        {"parameter": "residual_phosphorus", "value": 0.5, "units": "mg/L", "weight": 0.8},
-        {"parameter": "pH", "value": 6.5, "weight": 0.2}
-    ],
-    "optimization_method": "adaptive"
-})
-```
-
-### Specialized Lime Softening
-```python
-# Direct lime softening optimization
-result = calculate_lime_softening_dose({
-    "initial_water": {
-        "units": "mmol/L", 
-        "analysis": {"Ca": 5.0, "Mg": 2.0, "Alkalinity": 4.0},
-        "database": "minteq.dat"
-    },
-    "target_hardness_mg_caco3": 85
-})
-```
-
-### Complete Dose-Response Curves
-```python
-# Generate full curve in single call
-curve = generate_lime_softening_curve({
-    "initial_water": SOLUTION_OBJECT,
-    "lime_doses": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],  # mmol/L range
-    "database": "minteq.dat"
-})
-# Returns: complete curve data + optimal dose
-```
-
-## Traditional Workflows
-
-### pH Adjustment
-```python
-# Step 1: Find dose
-dosing = calculate_dosing_requirement({
-    "initial_solution": {
-        "units": "mmol/L",
-        "analysis": {"Ca": 2.0, "Mg": 1.0, "Alkalinity": 1.8},
-        "database": "minteq.dat"
-    },
-    "target_condition": {"parameter": "pH", "value": 8.5},
-    "reagent": {"formula": "NaOH"},
-    "database": "minteq.dat"
-})
-
-# Step 2: Verify
-result = simulate_chemical_addition({
-    "initial_solution": {
-        "units": "mmol/L",
-        "analysis": {"Ca": 2.0, "Mg": 1.0, "Alkalinity": 1.8},
-        "database": "minteq.dat"
-    },
-    "reactants": [{"formula": "NaOH", "amount": dosing["required_dose"], "units": "mmol"}],
-    "allow_precipitation": true,
-    "database": "minteq.dat"
-})
-```
-
-### Dose Optimization (USE BATCH!)
+### Dose Optimization via Batch Processing
 ```python
 # GOOD - Single API call with proper formatting
 result = batch_process_scenarios({
@@ -458,19 +536,13 @@ result = batch_process_scenarios({
 
 **Batch processing failures**: Verify `base_solution` has complete structure
 
-**Calculation sheet errors**: Ensure `calculation_data` field is present
-
 **Kinetic errors**: Use gradual time steps, larger seed values, or avoid kinetics if API support limited
 
-**Membrane scaling requests**: ❌ **Not available** - removed for scientific integrity
-
-**Missing optimal doses**: ✅ **Use enhanced optimization tools**:
-- `calculate_dosing_requirement_enhanced` - Multi-objective optimization
-- `optimize_phosphorus_removal` - Specialized P removal optimization  
-- `calculate_lime_softening_dose` - Lime softening with soda ash
-- `optimize_multi_reagent_treatment` - Advanced multi-chemical optimization
-
-**Slow optimization**: ✅ **Smart bounds now active** - stoichiometry sets efficient search ranges internally
+**Optimization needs**: Use `batch_process_scenarios` with appropriate scenario type:
+- `phosphorus_optimization` - P removal with coagulant
+- `lime_softening_optimization` - Lime softening
+- `multi_reagent_optimization` - Multiple chemicals (max 2)
+- `dose_response` - Dose-response curves
 
 ## Quick Reference
 - pH↑: NaOH, Ca(OH)2, Na2CO3
@@ -479,19 +551,16 @@ result = batch_process_scenarios({
 - P removal: FeCl3 → precipitates Strengite, Fe(OH)3
 - Heavy metals: NaOH → Metal(OH)n at pH 9-11
 
-**Remember**: 
-1. **12 tools available** - 6 core + 1 batch + 5 enhanced optimization tools
-2. **Enhanced tools for complex problems** - use specialized optimization functions for faster results
-3. **Smart bounds active** - optimization uses stoichiometry internally for efficiency (results are PHREEQC-only)
-4. **Use exact input templates** to avoid validation errors
-5. **Always wrap concentrations** in `analysis` object
-6. **Include required fields**: `units`, `database`, `temperature_celsius`
-7. **Use PHREEQC notation** and mmol/L units
-8. **Use batch processing** for multiple calculations
-9. **Follow field naming** exactly as specified
+**Remember**:
+1. **5 tools available** - 4 core tools + batch_process_scenarios (with 9 scenario types)
+2. **Use batch processing** for optimization - scenario types handle P removal, lime softening, etc.
+3. **Use exact input templates** to avoid validation errors
+4. **Always wrap concentrations** in `analysis` object
+5. **Include required fields**: `units`, `database`, `temperature_celsius`
+6. **Use PHREEQC notation** and mmol/L units
 
-## Server Status: ✅ **FULLY ENHANCED MODE**
-- **Scientific integrity**: All results from PHREEQC thermodynamic calculations
-- **Engineering efficiency**: Smart bounds for faster optimization convergence
-- **Technical focus**: Cost calculations removed, purely technical server
-- **Production ready**: All 12 tools enabled and validated
+## Server Status: ✅ **PRODUCTION READY**
+- **Server name**: `water_chemistry_mcp`
+- **5 registered tools** with MCP annotations
+- **PHREEQC thermodynamics only** - All results from validated calculations
+- **Batch optimization** - phosphorus, lime softening, multi-reagent via scenario types

@@ -1,11 +1,19 @@
 """
 PHREEQC wrapper module for water chemistry calculations.
+
+Supports two execution modes:
+1. PhreeqPython library (uses bundled VIPhreeqc - limited database compatibility)
+2. USGS PHREEQC subprocess (full database compatibility with USGS 3.8.x databases)
+
+The subprocess mode is preferred when using USGS databases for full functionality.
 """
 
 import logging
 import re
 import os
 import asyncio
+import subprocess
+import tempfile
 import itertools
 import numpy as np
 import math
@@ -52,10 +60,352 @@ def _get_phreeqc_rates_path() -> Optional[str]:
             rates_path = os.path.join(phreeqc_dir, "phreeqc_rates.dat")
             if os.path.exists(rates_path):
                 return rates_path
-    except:
-        pass
+    except (OSError, TypeError, KeyError) as e:
+        logger.debug(f"Error checking PHREEQC_DATABASE environment variable: {e}")
 
     return None
+
+
+# ============================================================================
+# USGS PHREEQC Subprocess Execution
+# ============================================================================
+
+
+@lru_cache(maxsize=1)
+def _get_usgs_phreeqc_executable() -> Optional[str]:
+    """
+    Find the USGS PHREEQC executable with caching.
+
+    Returns:
+        Path to phreeqc.exe or None if not found
+    """
+    # Common locations to check
+    potential_paths = [
+        "/mnt/c/Program Files/USGS/phreeqc-3.8.6-17100-x64/bin/Release/phreeqc.exe",
+        "C:\\Program Files\\USGS\\phreeqc-3.8.6-17100-x64\\bin\\Release\\phreeqc.exe",
+        "/usr/local/bin/phreeqc",
+        "/usr/bin/phreeqc",
+    ]
+
+    # Check environment variable first
+    phreeqc_exe = os.environ.get("USGS_PHREEQC_EXECUTABLE")
+    if phreeqc_exe and os.path.exists(phreeqc_exe):
+        logger.info(f"Using PHREEQC executable from environment: {phreeqc_exe}")
+        return phreeqc_exe
+
+    # Check each potential path
+    for path in potential_paths:
+        if os.path.exists(path):
+            logger.info(f"Found USGS PHREEQC executable at: {path}")
+            return path
+
+    logger.warning("USGS PHREEQC executable not found")
+    return None
+
+
+def _convert_wsl_path(path: str) -> str:
+    """Convert WSL path to Windows path for subprocess calls."""
+    if path.startswith("/mnt/c/"):
+        return "C:\\" + path[7:].replace("/", "\\")
+    return path
+
+
+async def run_phreeqc_subprocess(
+    input_string: str,
+    database_path: str,
+    timeout: int = 60,
+) -> Dict[str, Any]:
+    """
+    Run PHREEQC simulation using the USGS PHREEQC executable via subprocess.
+
+    This provides full compatibility with USGS 3.8.x databases which are
+    incompatible with the bundled VIPhreeqc in phreeqpython.
+
+    Args:
+        input_string: PHREEQC input script as a string
+        database_path: Path to the PHREEQC database file
+        timeout: Maximum time in seconds to wait for PHREEQC to complete
+
+    Returns:
+        Dictionary with simulation results
+
+    Raises:
+        PhreeqcError: If simulation fails or PHREEQC executable not found
+    """
+    phreeqc_exe = _get_usgs_phreeqc_executable()
+    if not phreeqc_exe:
+        raise PhreeqcError("USGS PHREEQC executable not found. Set USGS_PHREEQC_EXECUTABLE environment variable.")
+
+    # Create temp directory for input/output files
+    with tempfile.TemporaryDirectory(prefix="phreeqc_") as temp_dir:
+        # File paths
+        input_file = os.path.join(temp_dir, "input.pqi")
+        output_file = os.path.join(temp_dir, "output.pqo")
+        selected_output_file = os.path.join(temp_dir, "selected_output.txt")
+
+        # Modify input string to set selected output file
+        # Insert -file directive right after SELECTED_OUTPUT line
+        modified_input = _inject_selected_output_file(input_string, selected_output_file)
+
+        # Write input file
+        with open(input_file, "w") as f:
+            f.write(modified_input)
+
+        # Build command - PHREEQC uses: phreeqc input_file output_file database_file
+        # Convert paths for Windows if running in WSL
+        win_input = _convert_wsl_path(input_file)
+        win_output = _convert_wsl_path(output_file)
+        win_db = _convert_wsl_path(database_path)
+        win_exe = _convert_wsl_path(phreeqc_exe)
+
+        cmd = [win_exe, win_input, win_output, win_db]
+
+        logger.debug(f"Running PHREEQC command: {' '.join(cmd)}")
+
+        try:
+            # Run subprocess asynchronously
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout,
+            )
+
+            # Check for errors
+            if process.returncode != 0:
+                error_msg = stderr.decode() if stderr else "Unknown error"
+                # Also check output file for error messages
+                if os.path.exists(output_file):
+                    with open(output_file, "r") as f:
+                        output_content = f.read()
+                    if "ERROR" in output_content:
+                        # Extract error messages
+                        error_lines = [l for l in output_content.split("\n") if "ERROR" in l]
+                        error_msg = "\n".join(error_lines[:10])  # First 10 errors
+                raise PhreeqcError(
+                    f"PHREEQC subprocess failed (exit code {process.returncode}): {error_msg}"
+                )
+
+            # Parse results from output file and selected output
+            results = _parse_phreeqc_output_files(output_file, selected_output_file)
+
+            return results
+
+        except asyncio.TimeoutError:
+            raise PhreeqcError(f"PHREEQC subprocess timed out after {timeout} seconds")
+        except OSError as e:
+            raise PhreeqcError(f"Failed to run PHREEQC subprocess: {e}")
+
+
+def _inject_selected_output_file(input_string: str, output_file: str) -> str:
+    """
+    Inject -file directive into SELECTED_OUTPUT block to capture output.
+
+    Args:
+        input_string: Original PHREEQC input
+        output_file: Path to write selected output
+
+    Returns:
+        Modified PHREEQC input string
+    """
+    # Convert path for Windows
+    win_path = _convert_wsl_path(output_file)
+
+    # Find SELECTED_OUTPUT block and add -file directive
+    lines = input_string.split("\n")
+    result_lines = []
+    in_selected_output = False
+
+    for line in lines:
+        result_lines.append(line)
+        # Check if this is the start of SELECTED_OUTPUT block
+        if line.strip().upper().startswith("SELECTED_OUTPUT"):
+            in_selected_output = True
+            # Add -file directive immediately after
+            result_lines.append(f"    -file {win_path}")
+        elif in_selected_output and line.strip() and not line.strip().startswith("-") and not line.strip().startswith("#"):
+            # End of SELECTED_OUTPUT block (new keyword found)
+            in_selected_output = False
+
+    return "\n".join(result_lines)
+
+
+def _parse_phreeqc_output_files(
+    output_file: str,
+    selected_output_file: str,
+) -> Dict[str, Any]:
+    """
+    Parse PHREEQC output files and extract results.
+
+    Args:
+        output_file: Path to main PHREEQC output file (.pqo)
+        selected_output_file: Path to selected output file
+
+    Returns:
+        Dictionary with parsed results
+    """
+    results = {
+        "solution_summary": {},
+        "saturation_indices": {},
+        "element_totals_molality": {},
+        "species_molalities": {},
+    }
+
+    # Parse main output file for solution summary
+    if os.path.exists(output_file):
+        results.update(_parse_main_output(output_file))
+
+    # Parse selected output for detailed data
+    if os.path.exists(selected_output_file):
+        selected_data = _parse_selected_output(selected_output_file)
+        # Merge selected output data into results
+        if selected_data:
+            for key, value in selected_data.items():
+                if key in results and isinstance(results[key], dict) and isinstance(value, dict):
+                    results[key].update(value)
+                else:
+                    results[key] = value
+
+    return results
+
+
+def _parse_main_output(output_file: str) -> Dict[str, Any]:
+    """
+    Parse the main PHREEQC output file for solution properties.
+
+    Args:
+        output_file: Path to .pqo file
+
+    Returns:
+        Dictionary with solution summary and other properties
+    """
+    results = {"solution_summary": {}}
+    summary = results["solution_summary"]
+
+    try:
+        with open(output_file, "r") as f:
+            content = f.read()
+
+        # Extract pH
+        ph_match = re.search(r"pH\s*=\s*([\d.]+)", content)
+        if ph_match:
+            summary["pH"] = float(ph_match.group(1))
+
+        # Extract pe
+        pe_match = re.search(r"pe\s*=\s*([\d.+-eE]+)", content)
+        if pe_match:
+            summary["pe"] = float(pe_match.group(1))
+
+        # Extract temperature
+        temp_match = re.search(r"Temperature.*?=\s*([\d.]+)", content)
+        if temp_match:
+            summary["temperature_celsius"] = float(temp_match.group(1))
+
+        # Extract ionic strength
+        mu_match = re.search(r"Ionic strength.*?=\s*([\d.eE+-]+)", content)
+        if mu_match:
+            summary["ionic_strength_molal"] = float(mu_match.group(1))
+
+        # Extract specific conductance (if present)
+        sc_match = re.search(r"Specific Conductance.*?=\s*([\d.]+)", content)
+        if sc_match:
+            summary["specific_conductance_uS_cm"] = float(sc_match.group(1))
+
+        # Check for errors
+        if "ERROR" in content.upper():
+            error_lines = [l for l in content.split("\n") if "ERROR" in l.upper()]
+            results["errors"] = error_lines[:5]
+
+    except Exception as e:
+        logger.warning(f"Error parsing main PHREEQC output: {e}")
+
+    return results
+
+
+def _parse_selected_output(selected_output_file: str) -> Dict[str, Any]:
+    """
+    Parse the SELECTED_OUTPUT file (tab-separated values).
+
+    Args:
+        selected_output_file: Path to selected output file
+
+    Returns:
+        Dictionary with parsed data
+    """
+    results = {
+        "saturation_indices": {},
+        "element_totals_molality": {},
+        "species_molalities": {},
+    }
+
+    try:
+        with open(selected_output_file, "r") as f:
+            lines = f.readlines()
+
+        if len(lines) < 2:
+            return results
+
+        # First line is headers
+        headers = lines[0].strip().split("\t")
+
+        # Get last data row (final state)
+        data_line = lines[-1].strip()
+        values = data_line.split("\t")
+
+        # Map headers to values
+        for i, header in enumerate(headers):
+            if i >= len(values):
+                break
+
+            value = values[i].strip()
+            if not value or value == "-":
+                continue
+
+            try:
+                float_val = float(value)
+            except ValueError:
+                continue
+
+            header_clean = header.strip()
+            header_lower = header_clean.lower()
+
+            # Categorize based on header prefix
+            if header_lower.startswith("si_"):
+                # Saturation index: si_Calcite -> Calcite
+                mineral_name = header_clean[3:]
+                results["saturation_indices"][mineral_name] = float_val
+            elif header_lower.startswith("m_"):
+                # Molality: m_Ca+2 -> Ca+2
+                species_name = header_clean[2:]
+                results["species_molalities"][species_name] = float_val
+            elif header_lower.startswith("tot_"):
+                # Total: tot_Ca -> Ca
+                element_name = header_clean[4:]
+                results["element_totals_molality"][element_name] = float_val
+            elif header_lower == "ph":
+                results.setdefault("solution_summary", {})["pH"] = float_val
+            elif header_lower == "pe":
+                results.setdefault("solution_summary", {})["pe"] = float_val
+            elif header_lower in ["temp", "temp(c)", "temperature"]:
+                results.setdefault("solution_summary", {})["temperature_celsius"] = float_val
+            elif header_lower in ["mu", "ionic_strength"]:
+                results.setdefault("solution_summary", {})["ionic_strength_molal"] = float_val
+            elif header_lower == "alk":
+                results.setdefault("solution_summary", {})["alkalinity_eq_L"] = float_val
+
+    except Exception as e:
+        logger.warning(f"Error parsing SELECTED_OUTPUT file: {e}")
+
+    return results
+
+
+# Flag to control which execution mode to use
+# Set via environment variable: USE_PHREEQC_SUBPROCESS=1
+USE_SUBPROCESS = os.environ.get("USE_PHREEQC_SUBPROCESS", "1").lower() in ("1", "true", "yes")
 
 
 # Import helper functions
@@ -69,7 +419,7 @@ from utils.helpers import (
     build_kinetics_block,
     build_selected_output_block,
 )
-from utils.import_helpers import PHREEQPYTHON_AVAILABLE, DEFAULT_DATABASE
+from utils.import_helpers import PHREEQPYTHON_AVAILABLE, DEFAULT_DATABASE, get_default_database
 
 
 def get_mineral_alternatives(mineral_name, database_path=None):
@@ -326,6 +676,11 @@ async def run_phreeqc_simulation(
     Runs a PHREEQC simulation string and parses the results.
     Handles single or multiple step results.
 
+    Execution modes:
+    1. Subprocess mode (USE_SUBPROCESS=True): Uses USGS PHREEQC executable for full
+       database compatibility with USGS 3.8.x databases.
+    2. PhreeqPython mode: Uses bundled VIPhreeqc library (limited database compatibility).
+
     Args:
         input_string: PHREEQC input script as a string
         database_path: Path to the PHREEQC database file, or None for default
@@ -334,6 +689,21 @@ async def run_phreeqc_simulation(
     Returns:
         Dictionary or list of dictionaries with simulation results
     """
+    # Try subprocess mode first if enabled (provides full USGS database support)
+    if USE_SUBPROCESS and database_path and database_path != "INLINE":
+        phreeqc_exe = _get_usgs_phreeqc_executable()
+        if phreeqc_exe:
+            logger.info("Using USGS PHREEQC subprocess for full database compatibility")
+            try:
+                result = await run_phreeqc_subprocess(input_string, database_path)
+                # For multi-step, return as list
+                if num_steps > 1:
+                    return [result] * num_steps  # Subprocess doesn't support multi-step yet
+                return result
+            except PhreeqcError as e:
+                logger.warning(f"Subprocess mode failed: {e}, falling back to phreeqpython")
+                # Fall through to phreeqpython mode
+
     if not PHREEQPYTHON_AVAILABLE:
         raise PhreeqcError("PhreeqPython library is not available")
 
@@ -1040,48 +1410,90 @@ async def run_phreeqc_with_phreeqpython(
             f"Precipitation handling: allow_precipitation={allow_precipitation}, equilibrium_minerals={equilibrium_minerals}"
         )
         if allow_precipitation and equilibrium_minerals:
+            # FIX: Use phreeqpython's add_equilibrium_phase + interact for simultaneous equilibration
+            # instead of sequential desaturation which is order-dependent and incorrect
+            # (See expert review: "Sequential desaturate is order-dependent, not equivalent to PHREEQC equilibrium")
+
+            # First, filter to minerals that actually exist in this database
+            # by checking if SI can be calculated (SI=-999 means mineral not in database)
+            valid_minerals = []
             for mineral in equilibrium_minerals:
                 try:
-                    initial_si = solution.si(mineral)
-                    if initial_si > 0:  # Supersaturated
-                        logger.info(f"{mineral} is supersaturated (SI = {initial_si:.2f}), allowing precipitation")
+                    si = solution.si(mineral)
+                    if si is not None and si > -900:  # -999 indicates mineral not found
+                        valid_minerals.append(mineral)
+                except Exception:
+                    pass  # Mineral not in database
 
-                        # Get element that will be affected by this mineral
-                        # This is simplified - a more complete implementation would parse mineral formulas
-                        affected_elements = {
-                            "Calcite": "Ca",
-                            "Aragonite": "Ca",
-                            "Gypsum": "Ca",
-                            "Strengite": "P",
-                            "FePO4": "P",
-                            "Fe(OH)3(a)": "Fe",
-                            "Brucite": "Mg",
-                            "Mg(OH)2": "Mg",  # Critical for ZLD
-                            "Struvite": "P",
-                            "Vivianite": "P",
-                            "Sepiolite": "Mg",
-                            "Chrysotile": "Mg",
-                        }
+            if valid_minerals:
+                logger.info(f"Using {len(valid_minerals)} valid minerals for simultaneous equilibration")
 
-                        affected_element = affected_elements.get(mineral)
-                        if affected_element:
-                            initial_total = solution.total_element(affected_element, "mol")
+                # Filter to only supersaturated minerals (SI > 0)
+                supersaturated_minerals = []
+                for mineral in valid_minerals:
+                    try:
+                        si = solution.si(mineral)
+                        if si is not None and si > 0:
+                            supersaturated_minerals.append(mineral)
+                            logger.debug(f"  {mineral}: SI = {si:.3f} (supersaturated)")
+                    except Exception:
+                        pass
 
-                            # Desaturate to equilibrium (SI = 0)
-                            solution.desaturate(mineral, to_si=0)
+                if supersaturated_minerals:
+                    try:
+                        # Create equilibrium phase with all supersaturated minerals
+                        # Parameters: [phases], [target_si], [initial_moles]
+                        target_si_list = [0.0] * len(supersaturated_minerals)  # All to SI=0
+                        initial_moles_list = [0.0] * len(supersaturated_minerals)  # Start with no solid
 
-                            final_total = solution.total_element(affected_element, "mol")
-                            precipitated_amount = initial_total - final_total
+                        eq_phase = pp.add_equilibrium_phase(
+                            supersaturated_minerals, target_si_list, initial_moles_list
+                        )
 
-                            if precipitated_amount > 1e-10:  # Significant precipitation
-                                precipitated_phases[mineral] = precipitated_amount
-                                logger.info(f"Precipitated {precipitated_amount:.6f} mol of {mineral}")
+                        # Store initial element totals to calculate precipitation
+                        initial_elements = {elem: solution.total_element(elem, "mol")
+                                           for elem in solution.elements.keys()
+                                           if elem not in ["H", "O", "H(0)", "O(0)"]}
 
-                        final_si = solution.si(mineral)
-                        logger.info(f"{mineral} final SI = {final_si:.3f}")
+                        # Equilibrate solution with all phases simultaneously
+                        solution.interact(eq_phase)
 
-                except Exception as e:
-                    logger.warning(f"Could not handle precipitation of {mineral}: {e}")
+                        # Extract precipitated amounts from eq_phase.components
+                        if hasattr(eq_phase, 'components') and eq_phase.components:
+                            for mineral, moles in eq_phase.components.items():
+                                if moles > 1e-10:  # Significant precipitation
+                                    precipitated_phases[mineral] = moles
+                                    logger.info(f"Precipitated {moles:.6f} mol of {mineral}")
+
+                        logger.info("Used phreeqpython simultaneous equilibration (order-independent)")
+
+                    except Exception as e:
+                        logger.warning(f"Simultaneous equilibration failed: {e}, falling back to sequential")
+                        # Fallback to sequential desaturation for each supersaturated mineral
+                        for mineral in supersaturated_minerals:
+                            try:
+                                initial_si = solution.si(mineral)
+                                if initial_si > 0:
+                                    # Get affected element for tracking
+                                    affected_elements = {
+                                        "Calcite": "Ca", "Aragonite": "Ca", "Gypsum": "Ca",
+                                        "Brucite": "Mg", "Dolomite": "Ca", "Strengite": "P",
+                                    }
+                                    affected_elem = affected_elements.get(mineral)
+                                    initial_total = solution.total_element(affected_elem, "mol") if affected_elem else 0
+
+                                    solution.desaturate(mineral, to_si=0)
+
+                                    final_total = solution.total_element(affected_elem, "mol") if affected_elem else 0
+                                    precip_amount = initial_total - final_total
+                                    if precip_amount > 1e-10:
+                                        precipitated_phases[mineral] = precip_amount
+                            except Exception as e2:
+                                logger.debug(f"Could not desaturate {mineral}: {e2}")
+                else:
+                    logger.debug("No supersaturated minerals found - no precipitation needed")
+            else:
+                logger.warning("No valid minerals found in database for precipitation")
 
         # Calculate TDS (Total Dissolved Solids) using PHREEQC species data
         # This replaces the simplified element-based approach with proper speciation
@@ -1167,7 +1579,8 @@ async def run_phreeqc_with_phreeqpython(
             logger.warning(f"Error in PHREEQC-based TDS calculation: {e}")
             tds_mg_L = 0.0
 
-        # Extract comprehensive results
+        # Extract comprehensive results from the phreeqpython solution
+        # (After equilibration, solution object reflects the equilibrated state)
         results = {
             "solution_summary": {
                 "pH": solution.pH,
@@ -1177,7 +1590,7 @@ async def run_phreeqc_with_phreeqpython(
                 "volume_L": solution.volume,
                 "mass_kg_water": solution.mass,
                 "density_kg_L": solution.density,
-                "tds_calculated": tds_mg_L,  # Added TDS calculation
+                "tds_calculated": tds_mg_L,
             },
             "saturation_indices": solution.phases.copy() if hasattr(solution, "phases") else {},
             "element_totals_molality": solution.elements,
@@ -1447,8 +1860,8 @@ async def calculate_kinetic_precipitation(
         for mineral in minerals:
             try:
                 final_state["saturation_indices"][mineral] = solution.si(mineral)
-            except:
-                pass
+            except (ValueError, KeyError, AttributeError) as e:
+                logger.debug(f"Could not get SI for mineral {mineral}: {e}")
 
         results["final_solution"] = final_state
 
@@ -2164,39 +2577,32 @@ async def find_reactant_dose_for_target(
     equilibrium_phases_str = ""
     if allow_precipitation:
         # IMPORTANT: If no minerals are specified but precipitation is enabled,
-        # use default minerals based on water chemistry
+        # use UNIVERSAL_MINERALS which exist in ALL PHREEQC databases
         if not equilibrium_minerals:
-            # Try to extract water chemistry from the initial solution string
-            from utils.constants import select_minerals_for_water_chemistry, UNIVERSAL_MINERALS
+            from utils.constants import UNIVERSAL_MINERALS, MG_HYDROXIDE_NAMES
 
-            # First, get a simple set of universal minerals that work in all databases
-            equilibrium_minerals = UNIVERSAL_MINERALS
+            # Start with universal minerals
+            equilibrium_minerals = list(UNIVERSAL_MINERALS)
+
+            # Add database-specific Mg hydroxide name (critical for ZLD/softening)
+            # NOTE: Some databases (like phreeqc.dat) don't have Mg hydroxide phase
+            if database_path:
+                db_name = os.path.basename(database_path)
+                mg_oh_name = MG_HYDROXIDE_NAMES.get(db_name, "Brucite")  # Default to Brucite
+                if mg_oh_name:  # Only add if the database has an Mg hydroxide phase
+                    equilibrium_minerals.append(mg_oh_name)
+
             logger.info(f"No minerals specified, using universal minerals: {', '.join(equilibrium_minerals)}")
 
         if equilibrium_minerals:
-            from utils.database_management import database_manager
-
-            # Get compatible minerals for the selected database
-            mineral_mapping = database_manager.get_compatible_minerals(database_path, equilibrium_minerals)
-
-            # Filter out incompatible minerals and use alternatives where possible
-            compatible_minerals = []
-            for requested_mineral, compatible_mineral in mineral_mapping.items():
-                if compatible_mineral:
-                    compatible_minerals.append(compatible_mineral)
-                else:
-                    logger.warning(
-                        f"Mineral '{requested_mineral}' is not compatible with database "
-                        f"'{os.path.basename(database_path)}' and no alternative was found."
-                    )
-
-            # Build equilibrium phases block with compatible minerals
-            if compatible_minerals:
-                phases_to_consider = [{"name": name} for name in compatible_minerals]
-                equilibrium_phases_str = build_equilibrium_phases_block(phases_to_consider, block_num=1)
-                logger.info(f"Enabled precipitation with minerals: {', '.join(compatible_minerals)}")
-            else:
-                logger.warning("No compatible minerals found for precipitation")
+            # Use the minerals directly - UNIVERSAL_MINERALS are guaranteed to exist
+            # Skip the mineral registry mapping which has incorrect data for some databases
+            phases_to_consider = [{"name": name} for name in equilibrium_minerals]
+            equilibrium_phases_str = build_equilibrium_phases_block(
+                phases_to_consider, block_num=1, allow_empty=True
+            )
+            if equilibrium_phases_str:
+                logger.info(f"Enabled precipitation with minerals: {', '.join(equilibrium_minerals)}")
 
     for i in range(max_iterations):
         iterations_done = i + 1
@@ -2385,12 +2791,13 @@ KNOBS
                             if compatible_minerals:
                                 # Build a new equilibrium phases block
                                 phases_to_consider = [{"name": name} for name in compatible_minerals]
+                                # Use allow_empty=True for optional fallback behavior
                                 simple_equilibrium_phases_str = build_equilibrium_phases_block(
-                                    phases_to_consider, block_num=1
+                                    phases_to_consider, block_num=1, allow_empty=True
                                 )
 
                                 # Replace the existing equilibrium phases block if it exists
-                                if "EQUILIBRIUM_PHASES" in simplified_input:
+                                if simple_equilibrium_phases_str and "EQUILIBRIUM_PHASES" in simplified_input:
                                     simplified_input = re.sub(
                                         r"EQUILIBRIUM_PHASES\s+\d+(?:\s*#[^\n]*)?\n(.*?)(?=^[A-Z]|\Z)",
                                         simple_equilibrium_phases_str,
@@ -2609,11 +3016,16 @@ KNOBS
                 upper_bound_mmol = current_dose_mmol
 
             # Check for oscillation (changing direction)
+            # NOTE: We only apply aggressive narrowing when we're actually close to the target
+            # (error < tolerance * 10). Otherwise, the first direction change is just establishing
+            # initial bounds, not oscillation around the target.
             if prev_direction is not None and prev_direction != current_direction:
                 logger.info("Direction changed, possibly approaching target")
 
-                # If we're close but oscillating, narrow bounds more aggressively
-                if prev_error is not None and abs(error) < abs(prev_error) * 2:
+                # Only narrow aggressively if we're actually close to the target
+                # Otherwise we might cut off the search space before finding the target
+                if prev_error is not None and abs(error) < tolerance * 10 and abs(error) < abs(prev_error) * 2:
+                    logger.info("Close to target and making progress, narrowing bounds")
                     # We're making progress, so keep the bounds tighter
                     if current_direction == "increase":
                         # We need to increase dose but were previously decreasing

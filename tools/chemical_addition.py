@@ -57,22 +57,10 @@ async def simulate_chemical_addition(input_data: Dict[str, Any]) -> Dict[str, An
         logger.error(f"Input validation error: {e}")
         return {"error": f"Input validation error: {e}"}
 
-    # Validate database if provided
-    database_path = input_model.database
-    if database_path:
-        resolved_path = database_manager.resolve_database_path(database_path)
-        if resolved_path and database_manager.validate_database_path(resolved_path):
-            database_path = resolved_path
-            logger.info(f"Using resolved database path: {database_path}")
-        else:
-            logger.warning(f"Invalid database path: {database_path}, using recommended database instead")
-            recommended_db = database_manager.recommend_database("general")
-            logger.info(f"Using recommended database: {recommended_db}")
-            database_path = recommended_db
-    else:
-        # No database specified, use recommended
-        database_path = database_manager.recommend_database("general")
-        logger.info(f"No database specified, using recommended database: {database_path}")
+    # Centralized database resolution with validation and fallback
+    database_path = database_manager.resolve_and_validate_database(
+        input_model.database, category="general"
+    )
 
     try:
         # Extract initial solution parameters

@@ -26,14 +26,28 @@ PREFERRED_DATABASE_NAMES = [
 ]
 
 # Common default mineral list for precipitation calculations
-# These minerals exist in standard water treatment databases (especially minteq.dat)
+# These minerals exist with the SAME NAME in ALL PHREEQC databases
+# NOTE: "Brucite" is NOT included because it's called "Mg(OH)2" in phreeqc.dat
+# Use database-specific mineral selection for Mg hydroxide
 UNIVERSAL_MINERALS = [
     "Calcite",  # Calcium carbonate - ESSENTIAL for lime softening
     "Aragonite",  # Calcium carbonate polymorph
     "Gypsum",  # Calcium sulfate dihydrate
     "Anhydrite",  # Calcium sulfate
-    "Brucite",  # Magnesium hydroxide - CRITICAL for ZLD operations
 ]
+
+# Mg hydroxide has different names in different databases
+# Use this mapping when needed
+# NOTE: phreeqc.dat does NOT have any Mg hydroxide mineral phase defined!
+# It only has Mg(OH)2 as a SOLUTION_SPECIES (neutral aqueous species), not as a PHASE.
+# So we set it to None to indicate no Mg hydroxide precipitation is possible.
+MG_HYDROXIDE_NAMES = {
+    "minteq.v4.dat": "Brucite",
+    "minteq.dat": "Brucite",
+    "wateq4f.dat": "Brucite",
+    "phreeqc.dat": None,  # No Mg hydroxide phase in phreeqc.dat!
+    "llnl.dat": "Brucite",
+}
 
 # Legacy name for backward compatibility
 DEFAULT_MINERALS = UNIVERSAL_MINERALS

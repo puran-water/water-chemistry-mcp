@@ -36,6 +36,9 @@ class DatabaseManager:
         """
         Resolves a database path or name to a full path.
 
+        When USE_PHREEQC_SUBPROCESS is enabled, prefers USGS databases over bundled ones
+        since subprocess mode is specifically designed for USGS database compatibility.
+
         Args:
             database_path: Full path or just database filename
 
@@ -49,6 +52,19 @@ class DatabaseManager:
         # If it's just a filename, try to find it in available databases
         if not os.path.dirname(database_path):  # No directory component
             db_name = database_path
+
+            # Check if subprocess mode is enabled - if so, prefer USGS databases
+            use_subprocess = os.environ.get("USE_PHREEQC_SUBPROCESS", "").lower() in ("1", "true", "yes")
+
+            if use_subprocess and USGS_PHREEQC_DATABASE_PATH:
+                # When subprocess mode is enabled, prefer USGS databases
+                # since they have full mineral support with the USGS PHREEQC executable
+                usgs_db_path = os.path.join(USGS_PHREEQC_DATABASE_PATH, db_name)
+                if os.path.exists(usgs_db_path):
+                    logger.info(f"Subprocess mode: using USGS database {usgs_db_path}")
+                    return usgs_db_path
+
+            # Fallback to available databases list
             for db in self.available_databases:
                 if os.path.basename(db) == db_name:
                     return db
@@ -266,6 +282,43 @@ class DatabaseManager:
 
         # Fallback to default
         return self.default_database or ""
+
+    def resolve_and_validate_database(
+        self, database_path: Optional[str], category: str = "general"
+    ) -> str:
+        """
+        Centralized database resolution with validation and fallback.
+
+        This is the recommended way to handle database selection in tools.
+        It combines resolution, validation, and intelligent fallback in one call.
+
+        Args:
+            database_path: Database path/name provided by user, or None
+            category: Purpose category for fallback recommendation
+                      ('general', 'high_salinity', 'minerals', 'isotopes', etc.)
+
+        Returns:
+            Validated database path ready for use with PHREEQC
+
+        Example:
+            >>> db_path = database_manager.resolve_and_validate_database("minteq.dat", "general")
+            >>> # Now db_path is guaranteed to be a valid, existing database path
+        """
+        if database_path:
+            # Try to resolve the provided path
+            resolved_path = self.resolve_database_path(database_path)
+            if resolved_path and self.validate_database_path(resolved_path):
+                logger.debug(f"Using resolved database path: {resolved_path}")
+                return resolved_path
+            else:
+                logger.warning(
+                    f"Invalid database path: {database_path}, using recommended database instead"
+                )
+
+        # Fallback to recommended database for the category
+        recommended_db = self.recommend_database(category)
+        logger.debug(f"Using recommended database: {recommended_db}")
+        return recommended_db
 
     def get_compatible_minerals(
         self, database_path: str, requested_minerals: Optional[List[str]] = None

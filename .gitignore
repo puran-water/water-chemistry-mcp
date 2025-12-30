@@ -185,5 +185,23 @@ download_*.py
 # Claude Code settings
 **/.claude/settings.local.json
 
-# Codex/OpenAI credentials
+# Codex/OpenAI credentials and sessions
 .codex/
+
+# Claude Code full directory
+.claude/
+
+# Additional security patterns - credentials
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+credentials.json
+secrets.json
+auth.json
+
+# Cloud provider credentials
+.aws/
+.azure/
+.gcloud/

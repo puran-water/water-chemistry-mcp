@@ -25,10 +25,10 @@ from tools.batch_processing import (
     batch_process_scenarios,
     generate_lime_softening_curve,
     calculate_lime_softening_dose,
-    optimize_phosphorus_removal,
     # Note: optimize_multi_reagent_treatment is handled via batch_process_scenarios
     # with scenario_type="multi_reagent_optimization"
 )
+from tools.ferric_phosphate import calculate_ferric_dose_for_tp
 
 
 class TestResults:
@@ -299,61 +299,62 @@ async def test_lime_softening_dose_calculation(results: TestResults):
 
 
 async def test_phosphorus_removal_optimization(results: TestResults):
-    """Test specialized phosphorus removal optimization"""
+    """Test specialized phosphorus removal optimization using calculate_ferric_dose_for_tp"""
     test_name = "Phosphorus removal optimization"
     start_time = asyncio.get_event_loop().time()
-    
+
     try:
         p_water = {
             'analysis': {
                 'P': 8.5,  # High phosphorus
                 'Ca': 80,
                 'Mg': 25,
-                'Alkalinity': 140,
+                'Alkalinity': "as CaCO3 140",
                 'Cl': 160,
-                'pH': 7.2
             },
+            'units': 'mg/L',
+            'ph': 7.2,
             'temperature_celsius': 25
         }
-        
+
         target_p = 0.8  # mg/L
-        coagulant = 'FeCl3'
+        iron_source = 'FeCl3'
         target_ph = 7.5
-        
-        result = await optimize_phosphorus_removal(
-            initial_water=p_water,
-            target_p_mg_l=target_p,
-            coagulant=coagulant,
-            target_ph=target_ph,
-            database='minteq.dat'
-        )
-        
+
+        result = await calculate_ferric_dose_for_tp({
+            'initial_solution': p_water,
+            'target_residual_p_mg_l': target_p,
+            'iron_source': iron_source,
+            'database': 'minteq.v4.dat',
+            'ph_adjustment': {
+                'enabled': True,
+                'target_ph': target_ph,
+                'reagent': 'NaOH',
+            },
+        })
+
         # Validate result structure
-        assert 'converged' in result, "Missing convergence status"
-        assert 'doses' in result, "Missing dose information"
-        assert 'objective_results' in result, "Missing objective results"
-        
-        # Validate coagulant dosing
-        if result['converged']:
-            assert coagulant in result['doses'], f"Missing {coagulant} dose"
-            coagulant_dose = result['doses'][coagulant]
-            assert coagulant_dose > 0, "Coagulant dose should be positive"
-            
-            # Check P removal
-            if 'residual_phosphorus' in result['objective_results']:
-                p_result = result['objective_results']['residual_phosphorus']
-                achieved_p = p_result['current']
-                assert achieved_p < 5.0, "Phosphorus not significantly reduced"
-        
-        # May have pH adjustment reagent too
-        reagent_count = len(result['doses'])
-        assert reagent_count >= 1, "No reagents dosed"
-        assert reagent_count <= 3, "Too many reagents"
-        
+        assert result.get('status') == 'success', f"Expected success, got: {result.get('error', result.get('status'))}"
+        assert 'optimization_summary' in result, "Missing optimization_summary"
+
+        opt = result['optimization_summary']
+
+        # Validate Fe dose
+        assert opt.get('optimal_fe_dose_mg_l') is not None, "Missing optimal_fe_dose_mg_l"
+        assert opt.get('optimal_fe_dose_mg_l') > 0, "Fe dose should be positive"
+
+        # Check P removal
+        achieved_p = opt.get('achieved_p_mg_l')
+        assert achieved_p is not None, "Missing achieved_p_mg_l"
+        assert achieved_p < 5.0, "Phosphorus not significantly reduced"
+
+        # Check convergence
+        convergence = opt.get('convergence_achieved', False)
+
         duration = asyncio.get_event_loop().time() - start_time
-        convergence_status = "converged" if result['converged'] else "non-converged"
-        results.record_pass(test_name, duration, f"Target {target_p} mg/L P - {convergence_status}")
-        
+        convergence_status = "converged" if convergence else "non-converged"
+        results.record_pass(test_name, duration, f"Target {target_p} mg/L P, achieved {achieved_p:.2f} mg/L - {convergence_status}")
+
     except Exception as e:
         results.record_fail(test_name, str(e))
 

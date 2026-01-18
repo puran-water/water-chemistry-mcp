@@ -68,10 +68,12 @@ from tools.surface_interaction import simulate_surface_interaction
 from tools.optimization_tools import (
     generate_lime_softening_curve,
     calculate_lime_softening_dose,
-    optimize_phosphorus_removal,
     calculate_dosing_requirement_enhanced,
     optimize_multi_reagent_treatment,
 )
+
+# NEW: Ferric phosphate precipitation modeling
+from tools.ferric_phosphate import calculate_ferric_dose_for_tp
 
 # MCP BEST PRACTICE: Register tools with proper annotations
 # Annotations help clients understand tool behavior:
@@ -220,16 +222,6 @@ mcp.tool(
 
 mcp.tool(
     annotations={
-        "title": "Optimize Phosphorus Removal",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    }
-)(optimize_phosphorus_removal)
-
-mcp.tool(
-    annotations={
         "title": "Calculate Dosing Requirement Enhanced",
         "readOnlyHint": True,
         "destructiveHint": False,
@@ -247,6 +239,16 @@ mcp.tool(
         "openWorldHint": False,
     }
 )(optimize_multi_reagent_treatment)
+
+mcp.tool(
+    annotations={
+        "title": "Calculate Ferric Dose for Target Phosphorus",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)(calculate_ferric_dose_for_tp)
 
 # Log information about available dependencies
 from utils.import_helpers import PHREEQPYTHON_AVAILABLE
@@ -301,9 +303,9 @@ if __name__ == "__main__":
     logger.info("\nOPTIMIZATION TOOLS (5):")
     logger.info("  12. generate_lime_softening_curve: Complete dose-response curves")
     logger.info("  13. calculate_lime_softening_dose: Optimal lime softening dose")
-    logger.info("  14. optimize_phosphorus_removal: P removal with coagulant selection")
-    logger.info("  15. calculate_dosing_requirement_enhanced: Multi-objective dosing optimization")
-    logger.info("  16. optimize_multi_reagent_treatment: Multi-reagent with 4 strategies")
+    logger.info("  14. calculate_dosing_requirement_enhanced: Multi-objective dosing optimization")
+    logger.info("  15. optimize_multi_reagent_treatment: Multi-reagent with 4 strategies")
+    logger.info("  16. calculate_ferric_dose_for_tp: Fe-P precipitation with HFO surface complexation")
     logger.info("\n✅ FAIL LOUDLY: All errors raise typed exceptions")
     logger.info("✅ PHREEQC thermodynamics via phreeqpython API")
     logger.info("\n=== SERVER READY ===")

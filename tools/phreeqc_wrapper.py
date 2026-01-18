@@ -15,6 +15,8 @@ import asyncio
 import subprocess
 import tempfile
 import itertools
+import shutil
+import uuid
 import numpy as np
 import math
 from typing import Optional, Dict, Any, List, Tuple, Union
@@ -103,11 +105,31 @@ def _get_usgs_phreeqc_executable() -> Optional[str]:
     return None
 
 
-def _convert_wsl_path(path: str) -> str:
-    """Convert WSL path to Windows path for subprocess calls."""
-    if path.startswith("/mnt/c/"):
-        return "C:\\" + path[7:].replace("/", "\\")
+def _is_running_in_wsl() -> bool:
+    """Check if we're running inside WSL."""
+    try:
+        with open("/proc/version", "r") as f:
+            return "microsoft" in f.read().lower() or "wsl" in f.read().lower()
+    except (FileNotFoundError, IOError):
+        return False
+
+
+def _convert_wsl_path_to_windows(path: str) -> str:
+    """Convert WSL path to Windows path for passing to Windows executables."""
+    if path.startswith("/mnt/"):
+        # /mnt/c/Users/... -> C:\Users\...
+        drive_letter = path[5].upper()
+        rest_of_path = path[7:].replace("/", "\\")
+        return f"{drive_letter}:\\{rest_of_path}"
     return path
+
+
+def _get_wsl_temp_dir() -> str:
+    """Get a Windows-accessible temp directory for WSL."""
+    # Use a directory on the Windows drive that's accessible from both WSL and Windows
+    wsl_temp = "/mnt/c/Users/Public/Documents/phreeqc_temp"
+    os.makedirs(wsl_temp, exist_ok=True)
+    return wsl_temp
 
 
 async def run_phreeqc_subprocess(
@@ -136,29 +158,55 @@ async def run_phreeqc_subprocess(
     if not phreeqc_exe:
         raise PhreeqcError("USGS PHREEQC executable not found. Set USGS_PHREEQC_EXECUTABLE environment variable.")
 
+    # Determine if we're in WSL - affects how we handle paths
+    in_wsl = _is_running_in_wsl()
+
     # Create temp directory for input/output files
-    with tempfile.TemporaryDirectory(prefix="phreeqc_") as temp_dir:
-        # File paths
+    # In WSL, use a Windows-accessible directory; otherwise use system temp
+    if in_wsl:
+        temp_base = _get_wsl_temp_dir()
+        # Create unique subdirectory
+        temp_dir = os.path.join(temp_base, f"phreeqc_{uuid.uuid4().hex[:8]}")
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_context = None  # We'll clean up manually
+    else:
+        temp_context = tempfile.TemporaryDirectory(prefix="phreeqc_")
+        temp_dir = temp_context.name
+
+    try:
+        # File paths (WSL paths)
         input_file = os.path.join(temp_dir, "input.pqi")
         output_file = os.path.join(temp_dir, "output.pqo")
         selected_output_file = os.path.join(temp_dir, "selected_output.txt")
 
         # Modify input string to set selected output file
         # Insert -file directive right after SELECTED_OUTPUT line
-        modified_input = _inject_selected_output_file(input_string, selected_output_file)
+        # For PHREEQC exe, we need Windows paths in the input script
+        if in_wsl:
+            win_selected_output = _convert_wsl_path_to_windows(selected_output_file)
+        else:
+            win_selected_output = selected_output_file
+        modified_input = _inject_selected_output_file(input_string, win_selected_output)
 
         # Write input file
         with open(input_file, "w") as f:
             f.write(modified_input)
 
         # Build command - PHREEQC uses: phreeqc input_file output_file database_file
-        # Convert paths for Windows if running in WSL
-        win_input = _convert_wsl_path(input_file)
-        win_output = _convert_wsl_path(output_file)
-        win_db = _convert_wsl_path(database_path)
-        win_exe = _convert_wsl_path(phreeqc_exe)
+        if in_wsl:
+            # In WSL: executable uses WSL path, file args use Windows paths for the Windows exe
+            cmd_exe = phreeqc_exe  # Keep as WSL path (e.g., /mnt/c/...)
+            cmd_input = _convert_wsl_path_to_windows(input_file)
+            cmd_output = _convert_wsl_path_to_windows(output_file)
+            cmd_db = _convert_wsl_path_to_windows(database_path)
+        else:
+            # Native Windows or Linux - no conversion needed
+            cmd_exe = phreeqc_exe
+            cmd_input = input_file
+            cmd_output = output_file
+            cmd_db = database_path
 
-        cmd = [win_exe, win_input, win_output, win_db]
+        cmd = [cmd_exe, cmd_input, cmd_output, cmd_db]
 
         logger.debug(f"Running PHREEQC command: {' '.join(cmd)}")
 
@@ -199,6 +247,16 @@ async def run_phreeqc_subprocess(
             raise PhreeqcError(f"PHREEQC subprocess timed out after {timeout} seconds")
         except OSError as e:
             raise PhreeqcError(f"Failed to run PHREEQC subprocess: {e}")
+    finally:
+        # Cleanup temp directory
+        if in_wsl:
+            # Clean up WSL temp directory manually
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception:
+                pass  # Best effort cleanup
+        elif temp_context is not None:
+            temp_context.cleanup()
 
 
 def _inject_selected_output_file(input_string: str, output_file: str) -> str:
@@ -207,14 +265,11 @@ def _inject_selected_output_file(input_string: str, output_file: str) -> str:
 
     Args:
         input_string: Original PHREEQC input
-        output_file: Path to write selected output
+        output_file: Path to write selected output (should already be in correct format)
 
     Returns:
         Modified PHREEQC input string
     """
-    # Convert path for Windows
-    win_path = _convert_wsl_path(output_file)
-
     # Find SELECTED_OUTPUT block and add -file directive
     lines = input_string.split("\n")
     result_lines = []
@@ -226,7 +281,7 @@ def _inject_selected_output_file(input_string: str, output_file: str) -> str:
         if line.strip().upper().startswith("SELECTED_OUTPUT"):
             in_selected_output = True
             # Add -file directive immediately after
-            result_lines.append(f"    -file {win_path}")
+            result_lines.append(f"    -file {output_file}")
         elif in_selected_output and line.strip() and not line.strip().startswith("-") and not line.strip().startswith("#"):
             # End of SELECTED_OUTPUT block (new keyword found)
             in_selected_output = False
@@ -326,6 +381,37 @@ def _parse_main_output(output_file: str) -> Dict[str, Any]:
     return results
 
 
+def _normalize_element_name(element_name: str) -> str:
+    """
+    Normalize element name by stripping valence state.
+
+    Examples:
+        P(5) -> P
+        Fe(2) -> Fe
+        Fe(3) -> Fe
+        S(-2) -> S
+        Ca -> Ca
+    """
+    import re
+    # Match element symbol followed by optional valence in parentheses
+    match = re.match(r'^([A-Z][a-z]?)(\([+-]?\d+\))?$', element_name.strip())
+    if match:
+        return match.group(1)  # Return just the base element
+    return element_name  # Return unchanged if pattern doesn't match
+
+
+def _is_element_total_column(header: str) -> bool:
+    """
+    Check if a header represents an element total column.
+
+    Matches: P, Fe, Ca, Mg, P(5), Fe(2), S(-2), etc.
+    """
+    import re
+    # Pattern: 1-2 letter element symbol with optional valence
+    pattern = r'^[A-Z][a-z]?(\([+-]?\d+\))?$'
+    return bool(re.match(pattern, header.strip()))
+
+
 def _parse_selected_output(selected_output_file: str) -> Dict[str, Any]:
     """
     Parse the SELECTED_OUTPUT file (tab-separated values).
@@ -340,6 +426,8 @@ def _parse_selected_output(selected_output_file: str) -> Dict[str, Any]:
         "saturation_indices": {},
         "element_totals_molality": {},
         "species_molalities": {},
+        "equilibrium_phase_moles": {},  # From USER_PUNCH equi_* headers
+        "surface_adsorbed_moles": {},   # From USER_PUNCH surf_* headers
     }
 
     try:
@@ -347,10 +435,12 @@ def _parse_selected_output(selected_output_file: str) -> Dict[str, Any]:
             lines = f.readlines()
 
         if len(lines) < 2:
+            logger.warning(f"Selected output file has only {len(lines)} lines, expected >= 2")
             return results
 
         # First line is headers
         headers = lines[0].strip().split("\t")
+        logger.debug(f"Selected output headers ({len(headers)}): {headers[:20]}...")  # Log first 20
 
         # Get last data row (final state)
         data_line = lines[-1].strip()
@@ -371,21 +461,54 @@ def _parse_selected_output(selected_output_file: str) -> Dict[str, Any]:
                 continue
 
             header_clean = header.strip()
+            # Remove surrounding quotes (PHREEQC USER_PUNCH headers often have quotes)
+            if header_clean.startswith('"') and header_clean.endswith('"'):
+                header_clean = header_clean[1:-1]
             header_lower = header_clean.lower()
 
             # Categorize based on header prefix
+            # Handle both underscore format (si_Calcite) and parentheses format (si(Calcite))
             if header_lower.startswith("si_"):
                 # Saturation index: si_Calcite -> Calcite
                 mineral_name = header_clean[3:]
+                results["saturation_indices"][mineral_name] = float_val
+            elif header_lower.startswith("si(") and header_clean.endswith(")"):
+                # Saturation index: si(Calcite) -> Calcite
+                mineral_name = header_clean[3:-1]
                 results["saturation_indices"][mineral_name] = float_val
             elif header_lower.startswith("m_"):
                 # Molality: m_Ca+2 -> Ca+2
                 species_name = header_clean[2:]
                 results["species_molalities"][species_name] = float_val
+            elif header_lower.startswith("m(") and header_clean.endswith(")"):
+                # Molality: m(Ca+2) -> Ca+2
+                species_name = header_clean[2:-1]
+                results["species_molalities"][species_name] = float_val
+            elif header_lower.startswith("equi_"):
+                # Equilibrium phase moles from USER_PUNCH: equi_Strengite -> Strengite
+                phase_name = header_clean[5:]
+                results["equilibrium_phase_moles"][phase_name] = float_val
+            elif header_lower.startswith("surf_"):
+                # Surface-adsorbed moles from USER_PUNCH: surf_P_Hfo -> P_Hfo
+                surface_key = header_clean[5:]
+                results["surface_adsorbed_moles"][surface_key] = float_val
             elif header_lower.startswith("tot_"):
-                # Total: tot_Ca -> Ca
+                # Total: tot_Ca -> Ca, tot_P(5) -> P (USER_PUNCH format)
                 element_name = header_clean[4:]
-                results["element_totals_molality"][element_name] = float_val
+                base_element = _normalize_element_name(element_name)
+                results["element_totals_molality"][base_element] = float_val
+                logger.debug(f"Parsed tot_: {header_clean} -> {base_element} = {float_val}")
+            elif header_lower.startswith("tot(") and header_clean.endswith(")"):
+                # Total: tot(Ca) -> Ca, tot(P(5)) -> P (SELECTED_OUTPUT -tot format)
+                element_name = header_clean[4:-1]
+                base_element = _normalize_element_name(element_name)
+                results["element_totals_molality"][base_element] = float_val
+                logger.debug(f"Parsed tot(): {header_clean} -> {base_element} = {float_val}")
+            elif _is_element_total_column(header_clean):
+                # Bare element names like P, Fe, Ca, P(5), Fe(2) from -tot true output
+                base_element = _normalize_element_name(header_clean)
+                results["element_totals_molality"][base_element] = float_val
+                logger.debug(f"Parsed element name: {header_clean} -> {base_element} = {float_val}")
             elif header_lower == "ph":
                 results.setdefault("solution_summary", {})["pH"] = float_val
             elif header_lower == "pe":
@@ -418,6 +541,8 @@ from utils.helpers import (
     build_surface_block,
     build_kinetics_block,
     build_selected_output_block,
+    build_phase_linked_surface_block,
+    build_user_punch_for_partitioning,
 )
 from utils.import_helpers import PHREEQPYTHON_AVAILABLE, DEFAULT_DATABASE, get_default_database
 

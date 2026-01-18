@@ -19,18 +19,18 @@ Advanced water chemistry modeling MCP server powered by PHREEQC, designed for in
 4. **predict_scaling_potential** - Mineral scaling risk assessment
 5. **batch_process_scenarios** - Parallel scenario processing and optimization
 
-#### Advanced PHREEQC Tools (6)
+#### Advanced PHREEQC Tools (7)
 6. **calculate_dosing_requirement** - Binary search for target pH/hardness/SI
 7. **query_thermodynamic_database** - Query minerals, elements, species from databases
 8. **simulate_kinetic_reaction** - Time-dependent reaction modeling
 9. **simulate_gas_phase_interaction** - Gas-water equilibration (CO2 stripping, O2 transfer)
 10. **simulate_redox_adjustment** - pe/Eh/redox couple adjustment
 11. **simulate_surface_interaction** - Surface complexation modeling
+12. **calculate_ferric_dose_for_tp** - Optimal ferric/ferrous dose for target P removal with HFO surface complexation
 
-#### Optimization Tools (5)
-12. **generate_lime_softening_curve** - Complete dose-response curves in single call
-13. **calculate_lime_softening_dose** - Optimal lime dose for target hardness
-14. **optimize_phosphorus_removal** - P removal with coagulant selection
+#### Optimization Tools (4)
+13. **generate_lime_softening_curve** - Complete dose-response curves in single call
+14. **calculate_lime_softening_dose** - Optimal lime dose for target hardness
 15. **calculate_dosing_requirement_enhanced** - Multi-objective dosing optimization
 16. **optimize_multi_reagent_treatment** - Multi-reagent with 4 strategies (weighted_sum, pareto_front, sequential, robust)
 

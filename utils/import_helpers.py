@@ -134,42 +134,42 @@ def get_available_database_paths() -> List[str]:
     """
     available_dbs = []
 
-    if not PHREEQPYTHON_AVAILABLE:
-        return available_dbs
+    # PRIORITY: PhreeqPython bundled databases for portability (if installed)
+    if PHREEQPYTHON_AVAILABLE:
+        try:
+            pkg_dir = os.path.dirname(phreeqpython.__file__)
+            potential_db_dirs = [
+                os.path.join(pkg_dir, "database"),
+                os.path.join(pkg_dir, "databases"),
+                os.path.join(os.path.dirname(pkg_dir), "database"),
+            ]
 
-    # PRIORITY: PhreeqPython bundled databases for portability
-    try:
-        pkg_dir = os.path.dirname(phreeqpython.__file__)
-        potential_db_dirs = [
-            os.path.join(pkg_dir, "database"),
-            os.path.join(pkg_dir, "databases"),
-            os.path.join(os.path.dirname(pkg_dir), "database"),
-        ]
+            for db_dir in potential_db_dirs:
+                if os.path.exists(db_dir) and os.path.isdir(db_dir):
+                    from .constants import DEFAULT_DATABASE_NAMES
 
-        for db_dir in potential_db_dirs:
-            if os.path.exists(db_dir) and os.path.isdir(db_dir):
-                from .constants import DEFAULT_DATABASE_NAMES
-
-                # Add preferred databases first
-                for db_name in DEFAULT_DATABASE_NAMES:
-                    db_path = os.path.join(db_dir, db_name)
-                    if os.path.exists(db_path) and db_path not in available_dbs:
-                        available_dbs.append(db_path)
-                        logger.debug(f"Found PhreeqPython bundled database: {db_path}")
-
-                # Add any other .dat files
-                for file in os.listdir(db_dir):
-                    if file.endswith(".dat"):
-                        db_path = os.path.join(db_dir, file)
-                        if db_path not in available_dbs:
+                    # Add preferred databases first
+                    for db_name in DEFAULT_DATABASE_NAMES:
+                        db_path = os.path.join(db_dir, db_name)
+                        if os.path.exists(db_path) and db_path not in available_dbs:
                             available_dbs.append(db_path)
-                            logger.debug(f"Found additional PhreeqPython database: {db_path}")
+                            logger.debug(f"Found PhreeqPython bundled database: {db_path}")
 
-                if available_dbs:
-                    logger.info(f"Found {len(available_dbs)} databases in PhreeqPython package")
-                    break
-    except Exception as e:
-        logger.debug(f"Error searching PhreeqPython package for databases: {e}")
+                    # Add any other .dat files
+                    for file in os.listdir(db_dir):
+                        if file.endswith(".dat"):
+                            db_path = os.path.join(db_dir, file)
+                            if db_path not in available_dbs:
+                                available_dbs.append(db_path)
+                                logger.debug(f"Found additional PhreeqPython database: {db_path}")
+
+                    if available_dbs:
+                        logger.info(
+                            f"Found {len(available_dbs)} databases in PhreeqPython package"
+                        )
+                        break
+        except Exception as e:
+            logger.debug(f"Error searching PhreeqPython package for databases: {e}")
 
     # FALLBACK: USGS PHREEQC databases if needed
     if (

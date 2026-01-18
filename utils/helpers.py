@@ -29,8 +29,11 @@ def build_solution_block(solution_data: Dict[str, Any], solution_num: int = 1, s
     lines = [f"SOLUTION {solution_num}"]
 
     # Element mapping for common wastewater parameters
+    # NOTE: minteq.v4.dat uses bare element names as master species (e.g., P -> PO4-3)
+    # Do NOT map P to P(5) as it breaks TOT("P") in USER_PUNCH
+    # Users can specify valence explicitly if needed: P(5), Fe(3), S(-2), etc.
     ELEMENT_MAPPING = {
-        "P": "P(5)",  # Phosphorus as phosphate
+        # "P": "P",  # Phosphorus - don't remap, minteq.v4.dat uses P as master species
         "N": "N(5)",  # Nitrogen as nitrate (use N(-3) for ammonia)
         "Fe": "Fe(2)",  # Iron defaults to ferrous (use Fe(3) for ferric)
         "S": "S(6)",  # Sulfur as sulfate (use S(-2) for sulfide)
@@ -87,10 +90,22 @@ def build_solution_block(solution_data: Dict[str, Any], solution_num: int = 1, s
                     float(parts[1])
                     lines.append(f"    {parts[0]:<14}{' '.join(parts[1:])}")
                 except ValueError:
-                    # Assume format like "Alkalinity as CaCO3 120"
-                    lines.append(f"    {element:<14}{value}")
+                    # Handle format like "as CaCO3 100" -> "100 as CaCO3"
+                    # PHREEQC expects: Alkalinity    100 as CaCO3
+                    if parts[0].lower() == "as" and len(parts) >= 3:
+                        # Input: "as CaCO3 100" -> Output: "100 as CaCO3"
+                        try:
+                            num_val = float(parts[-1])
+                            unit_parts = parts[:-1]  # "as CaCO3"
+                            lines.append(f"    {element_to_use:<14}{num_val} {' '.join(unit_parts)}")
+                        except ValueError:
+                            # Can't parse number, pass raw
+                            lines.append(f"    {element_to_use:<14}{value}")
+                    else:
+                        # Other string formats, pass as-is
+                        lines.append(f"    {element_to_use:<14}{value}")
             else:
-                lines.append(f"    {element:<14}{value}")  # Pass raw string
+                lines.append(f"    {element_to_use:<14}{value}")  # Pass raw string
         elif isinstance(value, dict):
             val_num = value.get("value")
             if val_num is not None:
@@ -279,7 +294,8 @@ def build_gas_phase_block(gas_def: Dict[str, Any], block_num: int = 1) -> str:
         )
 
     # FAIL LOUDLY: No gas components is an error
-    if len(lines) <= 4:  # Only header and settings, no components
+    # Header (1) + settings (4) = 5 lines before any components
+    if len(lines) <= 5:  # Only header and settings, no components
         raise GasPhaseError(
             "No gas components defined in GAS_PHASE block. "
             "At least one component is required in 'initial_components'.",
@@ -623,6 +639,7 @@ def build_selected_output_block(
     surface: bool = True,
     exchange: bool = True,
     kinetics: bool = True,
+    user_punch: bool = False,
     composite_parameters: bool = False,
 ) -> str:
     """
@@ -659,12 +676,14 @@ def build_selected_output_block(
     if gases:
         lines.append("    -gas true")  # Gas phase components
 
+    if user_punch or composite_parameters:
+        lines.append("    -user_punch true")
+
     # Add composite parameter calculations using PHREEQC's native calculation engine
     if composite_parameters:
         lines.append("    # Composite parameters calculated by PHREEQC")
 
         # Total hardness as CaCO3 (mg/L): (Ca + Mg) * 50000 (equivalent weight of CaCO3)
-        lines.append("    -user_punch true")
         lines.append('    -headings "Total_Hardness_CaCO3" "Carbonate_Alkalinity_CaCO3" "TDS_Species"')
         lines.append("    -start")
         lines.append('        10 total_hardness = (TOT("Ca") + TOT("Mg")) * 50000')
@@ -683,5 +702,182 @@ def build_selected_output_block(
 
     # Avoid problematic options
     # No -elements, -surface, -exchange, -pressure, -density
+
+    return "\n".join(lines) + "\n"
+
+
+def build_phase_linked_surface_block(
+    surface_name: str,
+    phase_name: str,
+    sites_per_mole: float = 0.005,
+    specific_area_per_mole: float = 53300.0,
+    weak_to_strong_ratio: float = 40.0,
+    equilibrate_solution: int = 1,
+    block_num: int = 1,
+    no_edl: bool = False,
+    database: str = "minteq.v4.dat",
+) -> str:
+    """
+    Builds a phase-linked SURFACE block for HFO (hydrous ferric oxide) adsorption.
+
+    Phase-linked surfaces tie the number of adsorption sites to the amount of
+    a precipitated mineral phase (e.g., Fe(OH)3 or Ferrihydrite). This models
+    adsorption onto freshly precipitated iron hydroxide surfaces.
+
+    PHREEQC syntax for phase-linked surfaces:
+        <binding-site formula> <phase name> equilibrium_phase <sites_per_mole> [specific_area_per_mole]
+
+    Example:
+        Hfo_sOH  Ferrihydrite  equilibrium_phase  0.005  53300
+        Hfo_wOH  Ferrihydrite  equilibrium_phase  0.2    53300
+
+    Args:
+        surface_name: Base surface name (e.g., "Hfo" for hydrous ferric oxide)
+        phase_name: Equilibrium phase to link to (e.g., "Ferrihydrite", "Fe(OH)3(a)")
+        sites_per_mole: Strong site density (mol sites / mol phase), default 0.005
+        specific_area_per_mole: Specific surface area (m²/mol phase), default 53300
+        weak_to_strong_ratio: Ratio of weak to strong sites, default 40 (Dzombak & Morel)
+        equilibrate_solution: Solution number to equilibrate with
+        block_num: SURFACE block number
+        no_edl: If True, disable electric double layer calculations
+        database: Database name to determine correct binding-site formulas
+
+    Returns:
+        PHREEQC SURFACE block string with phase-linked sites
+
+    Raises:
+        SurfaceDefinitionError: If required parameters are missing or invalid
+    """
+    if not surface_name:
+        raise SurfaceDefinitionError(
+            "Surface name required for phase-linked SURFACE block",
+            missing_fields=["surface_name"]
+        )
+    if not phase_name:
+        raise SurfaceDefinitionError(
+            "Phase name required for phase-linked SURFACE block",
+            missing_fields=["phase_name"]
+        )
+
+    # Determine binding-site formula names based on database
+    # minteq.v4.dat and most databases use Hfo_sOH (strong) and Hfo_wOH (weak)
+    strong_site = f"{surface_name}_sOH"
+    weak_site = f"{surface_name}_wOH"
+
+    # Calculate weak site density from ratio
+    weak_sites_per_mole = sites_per_mole * weak_to_strong_ratio
+
+    lines = [f"SURFACE {block_num}"]
+
+    # Add equilibration directive first
+    lines.append(f"    -equilibrate {equilibrate_solution}")
+
+    # Strong sites - phase linked
+    # Format: <site> <phase> equilibrium_phase <sites_per_mole> <specific_area>
+    lines.append(
+        f"    {strong_site}  {phase_name}  equilibrium_phase  {sites_per_mole}  {specific_area_per_mole}"
+    )
+
+    # Weak sites - phase linked (same phase, higher site density)
+    lines.append(
+        f"    {weak_site}  {phase_name}  equilibrium_phase  {weak_sites_per_mole}  {specific_area_per_mole}"
+    )
+
+    # Optional: disable EDL for simpler/faster calculations
+    if no_edl:
+        lines.append("    -no_edl")
+
+    return "\n".join(lines) + "\n"
+
+
+def build_user_punch_for_partitioning(
+    phases: List[str],
+    surface_name: str = "Hfo",
+    elements: List[str] = None,
+    include_solution_totals: bool = True,
+    block_num: int = 1,
+) -> str:
+    """
+    Builds a USER_PUNCH block to extract Fe/P partitioning data.
+
+    This creates PHREEQC BASIC code to output:
+    - Moles of each equilibrium phase (precipitation)
+    - Moles of elements adsorbed on surfaces
+    - Total dissolved element concentrations
+
+    The output headers are designed to be parsed by _parse_selected_output().
+
+    PHREEQC BASIC functions used:
+    - EQUI("PhaseName"): Returns moles of equilibrium phase
+    - SURF("element", "surface"): Returns moles of element on surface
+    - TOT("element"): Returns total dissolved concentration (mol/kgw)
+
+    Args:
+        phases: List of equilibrium phase names to track (e.g., ["Strengite", "Vivianite"])
+        surface_name: Base surface name without underscore (e.g., "Hfo")
+        elements: Elements to track on surface and in solution (default: ["P", "Fe"])
+        include_solution_totals: If True, also output dissolved totals
+        block_num: USER_PUNCH block number
+
+    Returns:
+        PHREEQC USER_PUNCH block string
+
+    Example output headers:
+        equi_Strengite, equi_Vivianite, surf_P_Hfo, surf_Fe_Hfo, tot_P, tot_Fe
+    """
+    if elements is None:
+        elements = ["P", "Fe"]
+
+    lines = [f"USER_PUNCH {block_num}"]
+
+    # Build headers list
+    headers = []
+    punch_expressions = []
+    line_num = 10
+
+    # Phase moles (precipitation amounts)
+    for phase in phases:
+        header = f"equi_{phase}"
+        headers.append(header)
+        punch_expressions.append(f'{line_num} equi_{phase.replace("(", "_").replace(")", "_")} = EQUI("{phase}")')
+        line_num += 10
+
+    # Surface-adsorbed elements
+    for elem in elements:
+        header = f"surf_{elem}_{surface_name}"
+        headers.append(header)
+        # SURF("element", "surface") - surface name is base name without underscore
+        punch_expressions.append(f'{line_num} surf_{elem} = SURF("{elem}", "{surface_name}")')
+        line_num += 10
+
+    # Dissolved totals
+    if include_solution_totals:
+        for elem in elements:
+            header = f"tot_{elem}"
+            headers.append(header)
+            punch_expressions.append(f'{line_num} tot_{elem} = TOT("{elem}")')
+            line_num += 10
+
+    # Build the USER_PUNCH block
+    headers_str = " ".join([f'"{h}"' for h in headers])
+    lines.append(f"    -headings {headers_str}")
+    lines.append("    -start")
+
+    # Add calculation expressions
+    for expr in punch_expressions:
+        lines.append(f"    {expr}")
+
+    # Build PUNCH statement with all variables
+    var_names = []
+    for phase in phases:
+        var_names.append(f'equi_{phase.replace("(", "_").replace(")", "_")}')
+    for elem in elements:
+        var_names.append(f"surf_{elem}")
+    if include_solution_totals:
+        for elem in elements:
+            var_names.append(f"tot_{elem}")
+
+    lines.append(f"    {line_num} PUNCH {', '.join(var_names)}")
+    lines.append("    -end")
 
     return "\n".join(lines) + "\n"

@@ -107,11 +107,37 @@ AMORPHOUS_PHASES = {
         "conditions": "Forms in Fe-P systems at pH < 5",
         "databases": ["minteq.dat"],
     },
+    "Vivianite": {
+        "formula": "Fe3(PO4)2:8H2O",
+        "description": "Ferrous phosphate octahydrate",
+        "conditions": "Forms under anaerobic conditions with Fe(II) and P",
+        "databases": ["minteq.dat", "phreeqc.dat", "wateq4f.dat"],
+    },
     "MgNH4PO4:6H2O(s)": {
         "formula": "MgNH4PO4:6H2O",
         "description": "Struvite",
         "conditions": "Forms in wastewater with Mg, N, P",
         "databases": ["minteq.dat"],
+    },
+    # Iron sulfide phases (anaerobic)
+    "FeS(ppt)": {
+        "formula": "FeS",
+        "description": "Amorphous iron sulfide (precipitate)",
+        "conditions": "Forms under sulfidic, anaerobic conditions",
+        "databases": ["minteq.dat", "wateq4f.dat"],
+    },
+    "Mackinawite": {
+        "formula": "FeS",
+        "description": "Tetragonal iron sulfide",
+        "conditions": "Precursor to pyrite under anaerobic conditions",
+        "databases": ["phreeqc.dat", "wateq4f.dat", "minteq.dat"],
+    },
+    # Iron carbonate phases
+    "Siderite": {
+        "formula": "FeCO3",
+        "description": "Iron carbonate",
+        "conditions": "Forms under anaerobic conditions with high alkalinity",
+        "databases": ["phreeqc.dat", "minteq.dat", "wateq4f.dat"],
     },
 }
 
@@ -229,11 +255,29 @@ def get_amorphous_phases_for_system(solution_composition, pH, database="minteq.d
             recommended_phases.append("CSH")
 
     # Check for phosphate systems
-    if solution_composition.get("P", 0) > 0.5:
-        if solution_composition.get("Fe", 0) > 1 and pH < 5:
+    p_concentration = solution_composition.get("P", solution_composition.get("P(5)", 0))
+    if p_concentration > 0.5:
+        fe_concentration = solution_composition.get("Fe", 0)
+        if fe_concentration > 1 and pH < 5:
             recommended_phases.append("Strengite")
+        # Vivianite under anaerobic conditions (low pe or explicitly marked)
+        pe = solution_composition.get("pe", 4.0)
+        if fe_concentration > 1 and pe < 0:
+            recommended_phases.append("Vivianite")
         if solution_composition.get("Mg", 0) > 5 and solution_composition.get("N(-3)", 0) > 5:
             recommended_phases.append("MgNH4PO4:6H2O(s)")
+
+    # Check for iron sulfide systems (anaerobic with sulfide)
+    sulfide_concentration = solution_composition.get("S(-2)", 0)
+    fe_concentration = solution_composition.get("Fe", 0)
+    pe = solution_composition.get("pe", 4.0)
+    if sulfide_concentration > 0.1 and fe_concentration > 0.1 and pe < 0:
+        recommended_phases.extend(["FeS(ppt)", "Mackinawite"])
+
+    # Siderite under high alkalinity, anaerobic conditions
+    alkalinity = solution_composition.get("Alkalinity", solution_composition.get("C(4)", 0))
+    if alkalinity > 100 and fe_concentration > 1 and pe < 0:
+        recommended_phases.append("Siderite")
 
     # Filter by database availability
     available_phases = []

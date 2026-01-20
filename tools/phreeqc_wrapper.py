@@ -875,16 +875,24 @@ async def run_phreeqc_simulation(
                 raise FileNotFoundError(f"Database file does not exist: {db_to_use}")
 
             # Create PhreeqPython instance with the specified database
-            # PhreeqPython prefers just the database filename for built-in databases
-            db_basename = os.path.basename(db_to_use)
+            # PhreeqPython requires database filename and database_directory for custom paths
+            from pathlib import Path
 
-            # Try with just the basename first (works for standard databases)
+            db_basename = os.path.basename(db_to_use)
+            db_directory = Path(os.path.dirname(db_to_use))
+
+            # Try with database_directory parameter first (recommended for custom databases)
             try:
-                pp = PhreeqPython(database=db_basename)
-                logger.info(f"Successfully created PhreeqPython with database: {db_basename}")
+                if db_directory and db_directory.exists():
+                    pp = PhreeqPython(database=db_basename, database_directory=db_directory)
+                    logger.info(f"Successfully created PhreeqPython with database: {db_basename} from {db_directory}")
+                else:
+                    # Fallback to just basename for bundled databases
+                    pp = PhreeqPython(database=db_basename)
+                    logger.info(f"Successfully created PhreeqPython with bundled database: {db_basename}")
             except Exception as e:
-                logger.warning(f"Could not create PhreeqPython with basename {db_basename}, trying full path: {e}")
-                # Try with full path
+                logger.warning(f"Could not create PhreeqPython with database_directory: {e}")
+                # Try with full path as database parameter
                 try:
                     pp = PhreeqPython(database=db_to_use)
                     logger.info(f"Successfully created PhreeqPython with full path: {db_to_use}")
@@ -1466,6 +1474,8 @@ async def run_phreeqc_with_phreeqpython(
     if not PHREEQPYTHON_AVAILABLE:
         raise PhreeqcError("PhreeqPython library is not available")
 
+    from pathlib import Path
+
     from phreeqpython import PhreeqPython
 
     from utils.import_helpers import DEFAULT_DATABASE
@@ -1474,14 +1484,19 @@ async def run_phreeqc_with_phreeqpython(
 
     try:
         # Create PhreeqPython instance
-        # PhreeqPython works better with just the database filename
+        # PhreeqPython requires database filename and database_directory for custom paths
         if db_to_use and os.path.exists(db_to_use):
             db_basename = os.path.basename(db_to_use)
+            db_directory = Path(os.path.dirname(db_to_use))
             try:
-                pp = PhreeqPython(database=db_basename)
-                logger.info(f"Created PhreeqPython with database: {db_basename}")
+                if db_directory and db_directory.exists():
+                    pp = PhreeqPython(database=db_basename, database_directory=db_directory)
+                    logger.info(f"Created PhreeqPython with database: {db_basename} from {db_directory}")
+                else:
+                    pp = PhreeqPython(database=db_basename)
+                    logger.info(f"Created PhreeqPython with bundled database: {db_basename}")
             except Exception as e:
-                logger.warning(f"Could not use basename {db_basename}, trying full path: {e}")
+                logger.warning(f"Could not use database_directory, trying full path: {e}")
                 pp = PhreeqPython(database=db_to_use)
         else:
             pp = PhreeqPython()  # Use default

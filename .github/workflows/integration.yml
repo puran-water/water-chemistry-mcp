@@ -33,15 +33,15 @@ jobs:
         echo "Checking for PHREEQC databases in repo..."
         ls -la databases/official/
         if [ -f databases/official/phreeqc.dat ] && [ -s databases/official/phreeqc.dat ]; then
-          echo "✓ phreeqc.dat exists ($(wc -l < databases/official/phreeqc.dat) lines)"
+          echo "[PASS] phreeqc.dat exists ($(wc -l < databases/official/phreeqc.dat) lines)"
         else
-          echo "✗ phreeqc.dat missing or empty"
+          echo "[FAIL] phreeqc.dat missing or empty"
           exit 1
         fi
         if [ -f databases/official/minteq.v4.dat ] && [ -s databases/official/minteq.v4.dat ]; then
-          echo "✓ minteq.v4.dat exists ($(wc -l < databases/official/minteq.v4.dat) lines)"
+          echo "[PASS] minteq.v4.dat exists ($(wc -l < databases/official/minteq.v4.dat) lines)"
         else
-          echo "✗ minteq.v4.dat missing or empty"
+          echo "[FAIL] minteq.v4.dat missing or empty"
           exit 1
         fi
 
@@ -70,9 +70,9 @@ jobs:
                 )
                 result = await simulate_chemical_addition(input_data.model_dump())
                 assert 'solution_summary' in result
-                print('✓ Chemical addition test passed')
+                print('[PASS] Chemical addition test passed')
             except Exception as e:
-                print(f'✗ Chemical addition test failed: {e}')
+                print(f'[FAIL] Chemical addition test failed: {e}')
                 return False
             return True
 
@@ -107,9 +107,9 @@ jobs:
                 )
                 result = await predict_scaling_potential(input_data.model_dump())
                 assert 'scaling_indices' in result
-                print('✓ Scaling potential test passed')
+                print('[PASS] Scaling potential test passed')
             except Exception as e:
-                print(f'✗ Scaling potential test failed: {e}')
+                print(f'[FAIL] Scaling potential test failed: {e}')
                 import traceback
                 traceback.print_exc()
                 return False
@@ -146,9 +146,9 @@ jobs:
                 )
                 result = await calculate_solution_speciation(input_data.model_dump())
                 assert 'species_molality' in result
-                print('✓ Solution speciation test passed')
+                print('[PASS] Solution speciation test passed')
             except Exception as e:
-                print(f'✗ Solution speciation test failed: {e}')
+                print(f'[FAIL] Solution speciation test failed: {e}')
                 import traceback
                 traceback.print_exc()
                 return False
@@ -202,9 +202,9 @@ jobs:
                 assert 'kinetic_profiles' in result
                 profile = result['kinetic_profiles'][0]
                 assert len(profile['time_seconds']) >= 2
-                print('✓ Kinetic modeling test passed')
+                print('[PASS] Kinetic modeling test passed')
             except Exception as e:
-                print(f'✗ Kinetic modeling test failed: {e}')
+                print(f'[FAIL] Kinetic modeling test failed: {e}')
                 import traceback
                 traceback.print_exc()
                 return False

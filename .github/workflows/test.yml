@@ -101,9 +101,9 @@ jobs:
             from tools.chemical_addition import simulate_chemical_addition
             from tools.solution_speciation import calculate_solution_speciation
             from tools.scaling_potential import predict_scaling_potential
-            print('✓ All tools import successfully')
+            print('[PASS] All tools import successfully')
         except Exception as e:
-            print(f'✗ Import error: {e}')
+            print(f'[FAIL] Import error: {e}')
             sys.exit(1)
         "
 

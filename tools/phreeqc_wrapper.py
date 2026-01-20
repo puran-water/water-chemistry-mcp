@@ -1289,9 +1289,9 @@ def parse_phreeqc_results(pp_instance, num_steps: int = 1) -> Union[Dict[str, An
 
             # Extract precipitated phases if available
             try:
-                if hasattr(pp, "phases") and pp.phases:
+                if hasattr(pp_instance, "phases") and pp_instance.phases:
                     precipitated_phases = {}
-                    for phase_name, phase_obj in pp.phases.items():
+                    for phase_name, phase_obj in pp_instance.phases.items():
                         if hasattr(phase_obj, "moles") and phase_obj.moles > 0:
                             precipitated_phases[phase_name] = phase_obj.moles
                     if precipitated_phases:
@@ -2231,9 +2231,9 @@ async def calculate_kinetic_precipitation_phreeqc_native(
                         ):
                             logger.info("RK integration error detected - attempting to recover partial results")
                             # Try to get the last valid solution state
-                            if i > 0 and all_step_results:
+                            if i > 0 and raw_results:
                                 # Use previous step's values as approximation
-                                prev_result = all_step_results[-1]
+                                prev_result = raw_results[i - 1]
                                 time_points.append(time_steps[i] if i < len(time_steps) else 0)
                                 amounts_precipitated.append(amounts_precipitated[-1] if amounts_precipitated else 0.0)
                                 saturation_indices.append(saturation_indices[-1] if saturation_indices else -999.0)

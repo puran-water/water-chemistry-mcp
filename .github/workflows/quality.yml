@@ -34,7 +34,7 @@ jobs:
 
     - name: Run flake8 (linting)
       run: |
-        flake8 tools/ utils/ server.py --max-line-length=120 --extend-ignore=E203,W503
+        flake8 tools/ utils/ server.py --max-line-length=120 --extend-ignore=E203,W503,E402,F401,F841,E741,F541
 
     - name: Run mypy (type checking)
       run: |

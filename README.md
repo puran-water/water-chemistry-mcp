@@ -1,8 +1,8 @@
 # Water Chemistry MCP Server
 
-[![Test Suite](https://github.com/orgs/puran-water/water-chemistry-mcp/workflows/Test%20Suite/badge.svg)](https://github.com/orgs/puran-water/water-chemistry-mcp/actions/workflows/test.yml)
-[![Code Quality](https://github.com/orgs/puran-water/water-chemistry-mcp/workflows/Code%20Quality/badge.svg)](https://github.com/orgs/puran-water/water-chemistry-mcp/actions/workflows/quality.yml)
-[![Integration Tests](https://github.com/orgs/puran-water/water-chemistry-mcp/workflows/Integration%20Tests/badge.svg)](https://github.com/orgs/puran-water/water-chemistry-mcp/actions/workflows/integration.yml)
+[![Test Suite](https://github.com/puran-water/water-chemistry-mcp/workflows/Test%20Suite/badge.svg)](https://github.com/puran-water/water-chemistry-mcp/actions/workflows/test.yml)
+[![Code Quality](https://github.com/puran-water/water-chemistry-mcp/workflows/Code%20Quality/badge.svg)](https://github.com/puran-water/water-chemistry-mcp/actions/workflows/quality.yml)
+[![Integration Tests](https://github.com/puran-water/water-chemistry-mcp/workflows/Integration%20Tests/badge.svg)](https://github.com/puran-water/water-chemistry-mcp/actions/workflows/integration.yml)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -26,7 +26,7 @@ Advanced water chemistry modeling MCP server powered by PHREEQC, designed for in
 9. **simulate_gas_phase_interaction** - Gas-water equilibration (CO2 stripping, O2 transfer)
 10. **simulate_redox_adjustment** - pe/Eh/redox couple adjustment
 11. **simulate_surface_interaction** - Surface complexation modeling
-12. **calculate_ferric_dose_for_tp** - Optimal ferric/ferrous dose for target P removal with HFO surface complexation
+12. **calculate_ferric_dose_for_tp** - Optimal ferric/ferrous dose for target P removal with HFO surface complexation, mechanistic partition output, and marginal Fe:P analysis
 
 #### Optimization Tools (4)
 13. **generate_lime_softening_curve** - Complete dose-response curves in single call
@@ -48,7 +48,7 @@ Advanced water chemistry modeling MCP server powered by PHREEQC, designed for in
 ### Installation
 
 ```bash
-git clone https://github.com/orgs/puran-water/water-chemistry-mcp.git
+git clone https://github.com/puran-water/water-chemistry-mcp.git
 cd water-chemistry-mcp
 pip install -r requirements.txt
 ```
@@ -153,19 +153,25 @@ water-chemistry-mcp/
 │   ├── scaling_potential.py      # Scaling assessment
 │   ├── batch_processing.py       # Parallel processing
 │   ├── dosing_requirement.py     # Dosing optimization
-│   ├── optimization_tools.py     # Advanced optimization (5 tools)
+│   ├── optimization_tools.py     # Advanced optimization (4 tools)
 │   ├── thermodynamic_database.py # Database queries
 │   ├── kinetic_reaction.py       # Kinetic modeling
 │   ├── gas_phase.py              # Gas-water equilibria
 │   ├── redox_adjustment.py       # Redox control
 │   ├── surface_interaction.py    # Surface complexation
+│   ├── ferric_phosphate.py       # Fe-P precipitation modeling
 │   ├── phreeqc_wrapper.py        # PHREEQC integration
-│   └── schemas.py                # Pydantic schemas
+│   ├── schemas.py                # Core Pydantic schemas
+│   └── schemas_ferric.py         # Fe-P specific schemas
 ├── utils/                        # Utility modules
 │   ├── exceptions.py             # Typed exceptions (FAIL LOUDLY)
 │   ├── database_management.py    # Database handling
+│   ├── database_registry.py      # Database path registry
 │   ├── constants.py              # Mineral mappings
 │   ├── helpers.py                # PHREEQC block builders
+│   ├── ferric_phases.py          # Fe-P phase definitions
+│   ├── amorphous_phases.py       # Amorphous phase handling
+│   ├── convergence_strategies.py # Binary search strategies
 │   └── import_helpers.py         # PhreeqPython detection
 ├── tests/                        # Test suite
 ├── server.py                     # MCP server entry point
@@ -202,13 +208,14 @@ For Claude Desktop:
 
 ## Current Status
 
-**Server Version: 2.1**
+**Server Version: 2.2**
 
 - 16 registered MCP tools
 - FAIL LOUDLY error handling with typed exceptions
 - USGS PHREEQC subprocess support
 - Multi-objective optimization with 4 strategies
-- Comprehensive test coverage
+- Fe-P precipitation with mechanistic partition and marginal Fe:P analysis
+- Comprehensive test coverage (130+ tests)
 
 ## Documentation
 

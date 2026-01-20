@@ -13,6 +13,7 @@ References:
 """
 
 import logging
+import math
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -404,7 +405,7 @@ def format_kinetic_data_for_report(mineral: str) -> Dict[str, Any]:
         params["data_quality"] = "literature"
 
     # Add human-readable values
-    params["rate_constant_log"] = f"{np.log10(params['rate_constant']):.1f}"
+    params["rate_constant_log"] = f"{math.log10(params['rate_constant']):.1f}"
     params["activation_energy_kJ_mol"] = f"{params['activation_energy']/1000:.1f}"
 
     # Estimate precipitation timescales at different SI values

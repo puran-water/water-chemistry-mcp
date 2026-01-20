@@ -2,10 +2,13 @@
 Common schemas for water chemistry calculations.
 """
 
+import logging
 import re
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, root_validator, validator
+
+logger = logging.getLogger(__name__)
 
 # --- Common Base Models ---
 

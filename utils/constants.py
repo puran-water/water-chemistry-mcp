@@ -136,6 +136,8 @@ def select_minerals_for_water_chemistry(water_analysis, database_path=None):
     """
     import logging
 
+    from .mineral_registry import DATABASE_SPECIFIC_MINERALS, get_database_minerals
+
     logger = logging.getLogger(__name__)
 
     # Determine database name if path is provided

@@ -59,15 +59,18 @@ jobs:
         python -c "
         import asyncio
         import sys
+        import os
         sys.path.append('.')
-        
+
         async def test_chemical_addition():
             from tools.chemical_addition import simulate_chemical_addition
             from tools.schemas import SimulateChemicalAdditionInput, WaterAnalysisInput, ReactantInput
-            
+
             try:
+                # Use explicit database path from environment
+                db_path = os.path.join(os.environ['USGS_PHREEQC_DATABASE_PATH'], 'phreeqc.dat')
                 input_data = SimulateChemicalAdditionInput(
-                    database='minteq.dat',
+                    database=db_path,
                     reactants=[ReactantInput(amount=1, formula='NaOH')],
                     initial_solution=WaterAnalysisInput(ph=7, analysis={'Ca': 5, 'Cl': 10})
                 )
@@ -78,7 +81,7 @@ jobs:
                 print(f'✗ Chemical addition test failed: {e}')
                 return False
             return True
-        
+
         success = asyncio.run(test_chemical_addition())
         sys.exit(0 if success else 1)
         "

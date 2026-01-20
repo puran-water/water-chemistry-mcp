@@ -15,6 +15,7 @@ import logging
 import logging.handlers
 import os
 import sys
+
 from mcp.server.fastmcp import FastMCP
 
 # MCP BEST PRACTICE: Configure logging to use stderr (NOT stdout, which is the MCP channel)
@@ -43,37 +44,38 @@ mcp = FastMCP("water_chemistry_mcp")
 # Import all tools
 # =============================================================================
 
-# Core analysis tools
-from tools.solution_speciation import calculate_solution_speciation
-from tools.chemical_addition import simulate_chemical_addition
-from tools.solution_mixing import simulate_solution_mixing
-from tools.scaling_potential import predict_scaling_potential
 from tools.batch_processing import batch_process_scenarios
+from tools.chemical_addition import simulate_chemical_addition
 
 # NEW: Dosing requirement (phreeqpython API implementation)
 from tools.dosing_requirement import calculate_dosing_requirement
 
-# NEW: Thermodynamic database query
-from tools.thermodynamic_database import query_thermodynamic_database
+# NEW: Ferric phosphate precipitation modeling
+from tools.ferric_phosphate import calculate_ferric_dose_for_tp
+
+# NEW: Advanced PHREEQC features
+from tools.gas_phase import simulate_gas_phase_interaction
 
 # NEW: Kinetic reactions
 from tools.kinetic_reaction import simulate_kinetic_reaction
 
-# NEW: Advanced PHREEQC features
-from tools.gas_phase import simulate_gas_phase_interaction
-from tools.redox_adjustment import simulate_redox_adjustment
-from tools.surface_interaction import simulate_surface_interaction
-
 # NEW: Optimization tools
 from tools.optimization_tools import (
-    generate_lime_softening_curve,
-    calculate_lime_softening_dose,
     calculate_dosing_requirement_enhanced,
+    calculate_lime_softening_dose,
+    generate_lime_softening_curve,
     optimize_multi_reagent_treatment,
 )
+from tools.redox_adjustment import simulate_redox_adjustment
+from tools.scaling_potential import predict_scaling_potential
+from tools.solution_mixing import simulate_solution_mixing
 
-# NEW: Ferric phosphate precipitation modeling
-from tools.ferric_phosphate import calculate_ferric_dose_for_tp
+# Core analysis tools
+from tools.solution_speciation import calculate_solution_speciation
+from tools.surface_interaction import simulate_surface_interaction
+
+# NEW: Thermodynamic database query
+from tools.thermodynamic_database import query_thermodynamic_database
 
 # MCP BEST PRACTICE: Register tools with proper annotations
 # Annotations help clients understand tool behavior:
@@ -250,9 +252,10 @@ mcp.tool(
     }
 )(calculate_ferric_dose_for_tp)
 
+from utils.database_management import database_manager
+
 # Log information about available dependencies
 from utils.import_helpers import PHREEQPYTHON_AVAILABLE
-from utils.database_management import database_manager
 
 if __name__ == "__main__":
     logger.info("Starting Water Chemistry MCP server...")

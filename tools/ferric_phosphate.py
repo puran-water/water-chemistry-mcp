@@ -16,52 +16,53 @@ Key features:
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from .schemas_ferric import (
-    CalculateFerricDoseInput,
-    CalculateFerricDoseOutput,
-    FerricDoseOptimizationSummary,
-    PhosphatePartitioning,
-    IronPartitioning,
-    MechanisticPartition,
-    MarginalFePRatio,
-    RedoxSpecification,
-    SurfaceComplexationOptions,
-    BinarySearchOptions,
-    PhAdjustmentOptions,
-    orp_to_pe,
-    MOLECULAR_WEIGHTS,
-    mmol_to_mg_l,
-    mg_l_to_mmol,
-    get_coagulant_metal,
-    get_metal_atoms_per_formula,
-    metal_dose_to_product_dose,
-    is_iron_coagulant,
-    is_aluminum_coagulant,
+from utils.database_management import database_manager
+from utils.exceptions import InputValidationError
+from utils.ferric_phases import (
+    estimate_initial_fe_dose,
+    estimate_initial_metal_dose,
+    get_hao_surface_phase,
+    get_hfo_surface_phase,
+    get_phases_for_coagulant,
+    get_phases_for_redox_mode,
+    validate_phase_redox_consistency,
 )
-from .phreeqc_wrapper import run_phreeqc_simulation, PhreeqcError
 from utils.helpers import (
-    build_solution_block,
-    build_reaction_block,
     build_equilibrium_phases_block,
     build_equilibrium_phases_with_pe_constraint,
     build_fix_pe_phase,
-    build_selected_output_block,
     build_phase_linked_surface_block,
+    build_reaction_block,
+    build_selected_output_block,
+    build_solution_block,
     build_user_punch_for_partitioning,
 )
-from utils.ferric_phases import (
-    get_phases_for_redox_mode,
-    get_phases_for_coagulant,
-    get_hfo_surface_phase,
-    get_hao_surface_phase,
-    estimate_initial_fe_dose,
-    estimate_initial_metal_dose,
-    validate_phase_redox_consistency,
+
+from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
+from .schemas_ferric import (
+    MOLECULAR_WEIGHTS,
+    BinarySearchOptions,
+    CalculateFerricDoseInput,
+    CalculateFerricDoseOutput,
+    FerricDoseOptimizationSummary,
+    IronPartitioning,
+    MarginalFePRatio,
+    MechanisticPartition,
+    PhAdjustmentOptions,
+    PhosphatePartitioning,
+    RedoxSpecification,
+    SurfaceComplexationOptions,
+    get_coagulant_metal,
+    get_metal_atoms_per_formula,
+    is_aluminum_coagulant,
+    is_iron_coagulant,
+    metal_dose_to_product_dose,
+    mg_l_to_mmol,
+    mmol_to_mg_l,
+    orp_to_pe,
 )
-from utils.database_management import database_manager
-from utils.exceptions import InputValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -127,18 +128,16 @@ async def calculate_ferric_dose_for_tp(input_data: Dict[str, Any]) -> Dict[str, 
             specific_area_m2_per_mol=surface_opts.specific_area_m2_per_mol,
             no_edl=surface_opts.no_edl,
         )
-        logger.info(f"Applied hfo_site_multiplier={hfo_multiplier}, scaled strong sites to {surface_opts.sites_per_mole_strong}")
+        logger.info(
+            f"Applied hfo_site_multiplier={hfo_multiplier}, scaled strong sites to {surface_opts.sites_per_mole_strong}"
+        )
 
     # Step 2: Resolve database
     try:
-        database_path = database_manager.resolve_and_validate_database(
-            database, category="general"
-        )
+        database_path = database_manager.resolve_and_validate_database(database, category="general")
     except Exception as e:
         logger.warning(f"Database resolution failed, using default: {e}")
-        database_path = database_manager.resolve_and_validate_database(
-            "minteq.v4.dat", category="general"
-        )
+        database_path = database_manager.resolve_and_validate_database("minteq.v4.dat", category="general")
 
     # Step 3: Determine pe based on redox mode
     pe_value = _determine_pe(redox, initial_solution.get("temperature_celsius", 25.0))
@@ -159,19 +158,23 @@ async def calculate_ferric_dose_for_tp(input_data: Dict[str, Any]) -> Dict[str, 
         return {"error": "Could not determine initial P concentration from input"}
 
     if target_p_mg_l >= initial_p_mg_l:
-        return {
-            "error": f"Target P ({target_p_mg_l} mg/L) must be less than initial P ({initial_p_mg_l} mg/L)"
-        }
+        return {"error": f"Target P ({target_p_mg_l} mg/L) must be less than initial P ({initial_p_mg_l} mg/L)"}
 
     # Adjust effective target for inert (non-reactive) P
     # p_inert represents soluble P that won't precipitate (organic P, colloidal P)
     # Effective target for reactive P = target - inert
     effective_target_p = target_p_mg_l - p_inert
     if effective_target_p < 0:
-        notes_list = [f"Warning: p_inert_soluble_mg_l ({p_inert}) exceeds target ({target_p_mg_l}). Target is infeasible."]
+        notes_list = [
+            f"Warning: p_inert_soluble_mg_l ({p_inert}) exceeds target ({target_p_mg_l}). Target is infeasible."
+        ]
         return {
             "error": f"Target P ({target_p_mg_l} mg/L) is less than non-reactive P ({p_inert} mg/L). Cannot achieve target.",
-            "suggestions": ["Increase target_residual_p_mg_l", "Reduce p_inert_soluble_mg_l", "Pre-treat to remove organic/colloidal P"],
+            "suggestions": [
+                "Increase target_residual_p_mg_l",
+                "Reduce p_inert_soluble_mg_l",
+                "Pre-treat to remove organic/colloidal P",
+            ],
         }
     elif p_inert > 0:
         logger.info(f"Adjusted target for p_inert={p_inert}: effective reactive P target = {effective_target_p} mg/L")
@@ -280,7 +283,7 @@ async def calculate_ferric_dose_for_tp(input_data: Dict[str, Any]) -> Dict[str, 
     molar_ratio_multiplier = 18 if metal_type == "Al" else 15
     auto_scaled_max = max(
         input_model.max_dose_mg_l,
-        molar_ratio_multiplier * initial_p_mg_l * (MOLECULAR_WEIGHTS[metal_type] / MOLECULAR_WEIGHTS["P"])
+        molar_ratio_multiplier * initial_p_mg_l * (MOLECULAR_WEIGHTS[metal_type] / MOLECULAR_WEIGHTS["P"]),
     )
 
     if auto_scaled_max > input_model.max_dose_mg_l:
@@ -423,17 +426,13 @@ async def calculate_ferric_dose_for_tp(input_data: Dict[str, Any]) -> Dict[str, 
     )
 
     # Build partitioning outputs
-    p_partitioning = _build_phosphate_partitioning(
-        final_state, initial_p_mg_l, surface_opts.surface_name
-    )
+    p_partitioning = _build_phosphate_partitioning(final_state, initial_p_mg_l, surface_opts.surface_name)
     fe_partitioning = _build_iron_partitioning(
         final_state, optimal_fe_mmol, surface_opts.surface_name, metal_type=metal_type
     )
 
     # NEW: Build mechanistic partition (Phase 1)
-    mechanistic_part = _build_mechanistic_partition(
-        final_state, initial_p_mg_l, surface_opts.surface_name
-    )
+    mechanistic_part = _build_mechanistic_partition(final_state, initial_p_mg_l, surface_opts.surface_name)
 
     # NEW: Calculate marginal Fe:P (Phase 2)
     marginal_fe_p = _calculate_marginal_fe_p(optimization_path)
@@ -517,6 +516,7 @@ def _determine_pe(redox: RedoxSpecification, temperature: float) -> float:
         # the INITIAL pe that corresponds to the target ratio; the equilibrated
         # ratio depends on solution composition.
         import math
+
         f = redox.fe2_fraction or 0.5
         f = max(0.001, min(0.999, f))  # Clamp to avoid log(0) or log(inf)
         fe3_fe2_ratio = (1.0 - f) / f
@@ -620,36 +620,51 @@ async def _binary_search_fe_dose(
 
     # First, verify that bounds bracket the solution
     p_at_min = await _simulate_fe_dose(
-        initial_solution, fe_min, iron_source, phases, hfo_phase,
-        use_surface, surface_opts, pe_constraint, database_path
+        initial_solution,
+        fe_min,
+        iron_source,
+        phases,
+        hfo_phase,
+        use_surface,
+        surface_opts,
+        pe_constraint,
+        database_path,
     )
     p_at_max = await _simulate_fe_dose(
-        initial_solution, fe_max, iron_source, phases, hfo_phase,
-        use_surface, surface_opts, pe_constraint, database_path
+        initial_solution,
+        fe_max,
+        iron_source,
+        phases,
+        hfo_phase,
+        use_surface,
+        surface_opts,
+        pe_constraint,
+        database_path,
     )
 
     if p_at_min is None or p_at_max is None:
         raise PhreeqcError("Failed to evaluate initial bounds")
 
-    optimization_path.append({
-        "iteration": 0, "fe_mmol": fe_min, "p_mg_l": p_at_min, "type": "bound_check"
-    })
-    optimization_path.append({
-        "iteration": 0, "fe_mmol": fe_max, "p_mg_l": p_at_max, "type": "bound_check"
-    })
+    optimization_path.append({"iteration": 0, "fe_mmol": fe_min, "p_mg_l": p_at_min, "type": "bound_check"})
+    optimization_path.append({"iteration": 0, "fe_mmol": fe_max, "p_mg_l": p_at_max, "type": "bound_check"})
 
     # Expand bounds if needed
     expand_count = 0
     while p_at_max > target_p_mg_l and expand_count < 5:
         fe_max *= expansion_factor
         p_at_max = await _simulate_fe_dose(
-            initial_solution, fe_max, iron_source, phases, hfo_phase,
-            use_surface, surface_opts, pe_constraint, database_path
+            initial_solution,
+            fe_max,
+            iron_source,
+            phases,
+            hfo_phase,
+            use_surface,
+            surface_opts,
+            pe_constraint,
+            database_path,
         )
         expand_count += 1
-        optimization_path.append({
-            "iteration": 0, "fe_mmol": fe_max, "p_mg_l": p_at_max, "type": "bound_expansion"
-        })
+        optimization_path.append({"iteration": 0, "fe_mmol": fe_max, "p_mg_l": p_at_max, "type": "bound_expansion"})
         if p_at_max is None:
             raise PhreeqcError("Bound expansion failed")
 
@@ -685,16 +700,23 @@ async def _binary_search_fe_dose(
             )
         else:
             result = await _simulate_fe_dose_with_state(
-                initial_solution, fe_mid, iron_source, phases, hfo_phase,
-                use_surface, surface_opts, pe_constraint, database_path
+                initial_solution,
+                fe_mid,
+                iron_source,
+                phases,
+                hfo_phase,
+                use_surface,
+                surface_opts,
+                pe_constraint,
+                database_path,
             )
 
         if result is None:
             # Simulation failed, try narrowing from below
             fe_max = fe_mid
-            optimization_path.append({
-                "iteration": iteration, "fe_mmol": fe_mid, "p_mg_l": None, "error": "simulation_failed"
-            })
+            optimization_path.append(
+                {"iteration": iteration, "fe_mmol": fe_mid, "p_mg_l": None, "error": "simulation_failed"}
+            )
             continue
 
         p_mid = result["p_mg_l"]
@@ -743,8 +765,7 @@ async def _binary_search_fe_dose(
 
     # Return best found
     convergence_status = (
-        f"Max iterations ({max_iterations}) reached. "
-        f"Best: Fe={best_fe:.3f} mmol/L, P={best_p:.3f} mg/L"
+        f"Max iterations ({max_iterations}) reached. " f"Best: Fe={best_fe:.3f} mmol/L, P={best_p:.3f} mg/L"
     )
 
     # If we don't have a state, run one more simulation
@@ -764,8 +785,15 @@ async def _binary_search_fe_dose(
             )
         else:
             result = await _simulate_fe_dose_with_state(
-                initial_solution, best_fe, iron_source, phases, hfo_phase,
-                use_surface, surface_opts, pe_constraint, database_path
+                initial_solution,
+                best_fe,
+                iron_source,
+                phases,
+                hfo_phase,
+                use_surface,
+                surface_opts,
+                pe_constraint,
+                database_path,
             )
         if result:
             best_state = result["state"]
@@ -834,10 +862,7 @@ async def _simulate_with_ph_adjustment(
     # Need at least 3 mol NaOH (or 1.5 mol Ca(OH)2) per mol Fe to neutralize
     # Use 4:1 ratio for safety margin
     fe_neutralization_factor = 4.0 if reagent in ("NaOH", "HCl") else 2.0  # Ca(OH)2 has 2 OH-
-    auto_scaled_max_ph_dose = max(
-        ph_adjustment.max_dose_mmol,
-        fe_dose_mmol * fe_neutralization_factor
-    )
+    auto_scaled_max_ph_dose = max(ph_adjustment.max_dose_mmol, fe_dose_mmol * fe_neutralization_factor)
     if auto_scaled_max_ph_dose > ph_adjustment.max_dose_mmol:
         logger.info(
             f"Auto-scaled max pH dose from {ph_adjustment.max_dose_mmol:.1f} to "
@@ -848,8 +873,17 @@ async def _simulate_with_ph_adjustment(
 
     # First, simulate without pH adjustment to get baseline pH
     baseline = await _simulate_fe_and_ph_dose(
-        initial_solution, fe_dose_mmol, iron_source, 0.0, reagent,
-        phases, hfo_phase, use_surface, surface_opts, pe_constraint, database_path
+        initial_solution,
+        fe_dose_mmol,
+        iron_source,
+        0.0,
+        reagent,
+        phases,
+        hfo_phase,
+        use_surface,
+        surface_opts,
+        pe_constraint,
+        database_path,
     )
 
     if baseline is None:
@@ -888,8 +922,17 @@ async def _simulate_with_ph_adjustment(
         ph_mid = (ph_min + ph_max) / 2
 
         result = await _simulate_fe_and_ph_dose(
-            initial_solution, fe_dose_mmol, iron_source, ph_mid, reagent,
-            phases, hfo_phase, use_surface, surface_opts, pe_constraint, database_path
+            initial_solution,
+            fe_dose_mmol,
+            iron_source,
+            ph_mid,
+            reagent,
+            phases,
+            hfo_phase,
+            use_surface,
+            surface_opts,
+            pe_constraint,
+            database_path,
         )
 
         if result is None:
@@ -957,9 +1000,16 @@ async def _simulate_fe_and_ph_dose(
     try:
         # Build PHREEQC input with both reagents
         phreeqc_input = _build_phreeqc_input_with_ph_adjustment(
-            initial_solution, fe_dose_mmol, iron_source,
-            ph_reagent_dose_mmol, ph_reagent,
-            phases, hfo_phase, use_surface, surface_opts, pe_constraint
+            initial_solution,
+            fe_dose_mmol,
+            iron_source,
+            ph_reagent_dose_mmol,
+            ph_reagent,
+            phases,
+            hfo_phase,
+            use_surface,
+            surface_opts,
+            pe_constraint,
         )
 
         # Run simulation
@@ -992,8 +1042,15 @@ async def _simulate_fe_dose(
 ) -> Optional[float]:
     """Run simulation and return residual P in mg/L, or None on failure."""
     result = await _simulate_fe_dose_with_state(
-        initial_solution, fe_dose_mmol, iron_source, phases, hfo_phase,
-        use_surface, surface_opts, pe_constraint, database_path
+        initial_solution,
+        fe_dose_mmol,
+        iron_source,
+        phases,
+        hfo_phase,
+        use_surface,
+        surface_opts,
+        pe_constraint,
+        database_path,
     )
     return result["p_mg_l"] if result else None
 
@@ -1013,8 +1070,7 @@ async def _simulate_fe_dose_with_state(
     try:
         # Build PHREEQC input
         phreeqc_input = _build_phreeqc_input(
-            initial_solution, fe_dose_mmol, iron_source, phases,
-            hfo_phase, use_surface, surface_opts, pe_constraint
+            initial_solution, fe_dose_mmol, iron_source, phases, hfo_phase, use_surface, surface_opts, pe_constraint
         )
 
         # Run simulation
@@ -1072,12 +1128,14 @@ def _build_phreeqc_input(
 
     # Equilibrium phases block with pe constraint
     if phases or pe_constraint:
-        blocks.append(build_equilibrium_phases_with_pe_constraint(
-            phases=phases or [],
-            pe_constraint=pe_constraint,
-            block_num=1,
-            allow_empty=not phases,  # Allow empty if only pe_constraint
-        ))
+        blocks.append(
+            build_equilibrium_phases_with_pe_constraint(
+                phases=phases or [],
+                pe_constraint=pe_constraint,
+                block_num=1,
+                allow_empty=not phases,  # Allow empty if only pe_constraint
+            )
+        )
 
     # Surface block (phase-linked to HFO)
     if use_surface and hfo_phase:
@@ -1095,15 +1153,17 @@ def _build_phreeqc_input(
         )
 
     # Selected output block
-    blocks.append(build_selected_output_block(
-        block_num=1,
-        totals=True,
-        molalities=True,
-        phases=True,
-        saturation_indices=True,
-        surface=use_surface,
-        user_punch=True,
-    ))
+    blocks.append(
+        build_selected_output_block(
+            block_num=1,
+            totals=True,
+            molalities=True,
+            phases=True,
+            saturation_indices=True,
+            surface=use_surface,
+            user_punch=True,
+        )
+    )
 
     # USER_PUNCH for partitioning
     phase_names = [p["name"] for p in phases if "name" in p]
@@ -1203,20 +1263,22 @@ def _build_phreeqc_input_with_ph_adjustment(
     product_dose_mmol = metal_dose_to_product_dose(fe_dose_mmol, iron_source) if fe_dose_mmol > 0 else 0
 
     if product_dose_mmol > 0 or ph_reagent_dose_mmol > 0:
-        blocks.append(_build_multi_reagent_reaction_block(
-            product_dose_mmol, iron_source,
-            ph_reagent_dose_mmol, ph_reagent,
-            reaction_num=1
-        ))
+        blocks.append(
+            _build_multi_reagent_reaction_block(
+                product_dose_mmol, iron_source, ph_reagent_dose_mmol, ph_reagent, reaction_num=1
+            )
+        )
 
     # Equilibrium phases block with pe constraint
     if phases or pe_constraint:
-        blocks.append(build_equilibrium_phases_with_pe_constraint(
-            phases=phases or [],
-            pe_constraint=pe_constraint,
-            block_num=1,
-            allow_empty=not phases,
-        ))
+        blocks.append(
+            build_equilibrium_phases_with_pe_constraint(
+                phases=phases or [],
+                pe_constraint=pe_constraint,
+                block_num=1,
+                allow_empty=not phases,
+            )
+        )
 
     # Surface block (phase-linked to HFO)
     if use_surface and hfo_phase:
@@ -1234,15 +1296,17 @@ def _build_phreeqc_input_with_ph_adjustment(
         )
 
     # Selected output block
-    blocks.append(build_selected_output_block(
-        block_num=1,
-        totals=True,
-        molalities=True,
-        phases=True,
-        saturation_indices=True,
-        surface=use_surface,
-        user_punch=True,
-    ))
+    blocks.append(
+        build_selected_output_block(
+            block_num=1,
+            totals=True,
+            molalities=True,
+            phases=True,
+            saturation_indices=True,
+            surface=use_surface,
+            user_punch=True,
+        )
+    )
 
     # USER_PUNCH for partitioning
     phase_names = [p["name"] for p in phases if "name" in p]
@@ -1351,7 +1415,9 @@ def _build_iron_partitioning(
             precipitated_metal_mmol += metal_in_phase
 
     # Metal utilization
-    utilization_pct = ((added_metal_mmol - dissolved_metal_mmol) / added_metal_mmol) * 100 if added_metal_mmol > 0 else 0
+    utilization_pct = (
+        ((added_metal_mmol - dissolved_metal_mmol) / added_metal_mmol) * 100 if added_metal_mmol > 0 else 0
+    )
 
     return IronPartitioning(
         dissolved_fe_mmol=dissolved_metal_mmol,
@@ -1402,10 +1468,9 @@ def _build_mechanistic_partition(
     dissolved_fe_mmol = dissolved_fe_molal * 1000
 
     # Fe in HFO/Ferrihydrite (includes Fe(OH)3(a) for other databases)
-    fe_in_hfo_moles = (
-        equi_phases.get("Ferrihydrite", 0) +  # minteq.v4.dat
-        equi_phases.get("Fe(OH)3(a)", 0)       # phreeqc.dat, wateq4f.dat
-    )
+    fe_in_hfo_moles = equi_phases.get("Ferrihydrite", 0) + equi_phases.get(  # minteq.v4.dat
+        "Fe(OH)3(a)", 0
+    )  # phreeqc.dat, wateq4f.dat
     fe_in_hfo_mmol = fe_in_hfo_moles * 1000
 
     # Fe in Vivianite (3 Fe per formula unit)
@@ -1413,10 +1478,7 @@ def _build_mechanistic_partition(
     fe_in_vivianite_mmol = vivianite_moles * 3 * 1000
 
     # Fe in FeS (1 Fe per formula)
-    fe_in_fes_moles = (
-        equi_phases.get("FeS(ppt)", 0) +
-        equi_phases.get("Mackinawite", 0)
-    )
+    fe_in_fes_moles = equi_phases.get("FeS(ppt)", 0) + equi_phases.get("Mackinawite", 0)
     fe_in_fes_mmol = fe_in_fes_moles * 1000
 
     # Fe in Siderite (1 Fe per formula)
@@ -1479,7 +1541,8 @@ def _calculate_marginal_fe_p(
     """
     # Filter to valid iterations with both fe_mmol and p_mg_l
     valid_iters = [
-        entry for entry in optimization_path
+        entry
+        for entry in optimization_path
         if entry.get("fe_mmol") is not None
         and entry.get("p_mg_l") is not None
         and entry.get("type") != "bound_check"
@@ -1513,7 +1576,7 @@ def _calculate_marginal_fe_p(
     # Convert P from mg/L to mmol/L for molar ratio
     delta_p_mmol = delta_p / MOLECULAR_WEIGHTS["P"]
 
-    marginal_ratio = delta_fe / delta_p_mmol if delta_p_mmol > 0 else float('inf')
+    marginal_ratio = delta_fe / delta_p_mmol if delta_p_mmol > 0 else float("inf")
 
     # Determine interpretation
     if marginal_ratio < 2.0:

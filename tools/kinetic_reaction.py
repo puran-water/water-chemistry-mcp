@@ -7,25 +7,26 @@ Uses PHREEQC KINETICS and RATES blocks for time-dependent reactions.
 
 import logging
 import os
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from utils.database_management import database_manager
-from utils.import_helpers import PHREEQPYTHON_AVAILABLE
 from utils.exceptions import (
-    InputValidationError,
-    PhreeqcSimulationError,
     DatabaseLoadError,
-    KineticsDefinitionError,
     FeatureNotSupportedError,
+    InputValidationError,
+    KineticsDefinitionError,
+    PhreeqcSimulationError,
 )
 from utils.helpers import (
-    build_solution_block,
-    build_kinetics_block,
     build_equilibrium_phases_block,
+    build_kinetics_block,
     build_selected_output_block,
+    build_solution_block,
 )
+from utils.import_helpers import PHREEQPYTHON_AVAILABLE
+
+from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
 from .schemas import SimulateKineticReactionInput, SimulateKineticReactionOutput, SolutionOutput
-from .phreeqc_wrapper import run_phreeqc_simulation, PhreeqcError
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +62,7 @@ async def simulate_kinetic_reaction(input_data: Dict[str, Any]) -> Dict[str, Any
     logger.info("Running simulate_kinetic_reaction tool...")
 
     if not PHREEQPYTHON_AVAILABLE:
-        raise PhreeqcSimulationError(
-            "PhreeqPython is not available. Install with: pip install phreeqpython"
-        )
+        raise PhreeqcSimulationError("PhreeqPython is not available. Install with: pip install phreeqpython")
 
     # Validate input
     try:
@@ -72,9 +71,7 @@ async def simulate_kinetic_reaction(input_data: Dict[str, Any]) -> Dict[str, Any
         raise InputValidationError(f"Input validation error: {e}")
 
     # Resolve database
-    database_path = database_manager.resolve_and_validate_database(
-        input_model.database, category="general"
-    )
+    database_path = database_manager.resolve_and_validate_database(input_model.database, category="general")
 
     # Extract kinetic reaction definition
     kinetic_def = input_model.kinetic_reactions.model_dump(exclude_defaults=True)
@@ -206,9 +203,7 @@ async def simulate_kinetic_reaction_time_series(input_data: Dict[str, Any]) -> D
     logger.info("Running simulate_kinetic_reaction_time_series tool...")
 
     if not PHREEQPYTHON_AVAILABLE:
-        raise PhreeqcSimulationError(
-            "PhreeqPython is not available. Install with: pip install phreeqpython"
-        )
+        raise PhreeqcSimulationError("PhreeqPython is not available. Install with: pip install phreeqpython")
 
     # Validate input
     try:
@@ -217,9 +212,7 @@ async def simulate_kinetic_reaction_time_series(input_data: Dict[str, Any]) -> D
         raise InputValidationError(f"Input validation error: {e}")
 
     # Resolve database
-    database_path = database_manager.resolve_and_validate_database(
-        input_model.database, category="general"
-    )
+    database_path = database_manager.resolve_and_validate_database(input_model.database, category="general")
 
     # Extract definitions
     kinetic_def = input_model.kinetic_reactions.model_dump(exclude_defaults=True)
@@ -243,9 +236,7 @@ async def simulate_kinetic_reaction_time_series(input_data: Dict[str, Any]) -> D
         allow_precipitation = input_model.allow_precipitation if input_model.allow_precipitation is not None else True
 
         if allow_precipitation and input_model.equilibrium_minerals:
-            mineral_mapping = database_manager.get_compatible_minerals(
-                database_path, input_model.equilibrium_minerals
-            )
+            mineral_mapping = database_manager.get_compatible_minerals(database_path, input_model.equilibrium_minerals)
             equilibrium_minerals = [m for m in mineral_mapping.values() if m]
 
             if equilibrium_minerals:

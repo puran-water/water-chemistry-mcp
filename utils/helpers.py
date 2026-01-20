@@ -7,17 +7,42 @@ empty strings on error. This ensures errors are never silently ignored.
 
 import logging
 import re
-from typing import Dict, Any, List, Optional, Union, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from .exceptions import (
+    GasPhaseError,
     InputValidationError,
     KineticsDefinitionError,
-    SurfaceDefinitionError,
-    GasPhaseError,
     RedoxSpecificationError,
+    SurfaceDefinitionError,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def build_fix_pe_phase() -> str:
+    """
+    Generate PHREEQC PHASES block for Fix_pe pseudo-phase.
+
+    This pseudo-phase allows constraining electron activity (pe) throughout
+    a simulation. The reaction e- = e- with log_k = 0 means that at equilibrium,
+    the saturation index equals log(a_e-) = -pe.
+
+    To fix pe at a specific value, use in EQUILIBRIUM_PHASES with:
+        Fix_pe  <SI>  <initial_moles>
+    Where SI = -target_pe (e.g., SI = 4.0 to fix pe at -4.0 for anaerobic)
+
+    This approach models systems with sufficient reducing/oxidizing capacity
+    to maintain the specified pe without requiring explicit redox agents.
+
+    Returns:
+        PHREEQC PHASES block string defining the Fix_pe pseudo-phase
+    """
+    return """PHASES
+Fix_pe
+    e- = e-
+    log_k 0.0
+"""
 
 
 def build_solution_block(solution_data: Dict[str, Any], solution_num: int = 1, solution_number: int = None) -> str:
@@ -32,15 +57,29 @@ def build_solution_block(solution_data: Dict[str, Any], solution_num: int = 1, s
     # NOTE: minteq.v4.dat uses bare element names as master species (e.g., P -> PO4-3)
     # Do NOT map P to P(5) as it breaks TOT("P") in USER_PUNCH
     # Users can specify valence explicitly if needed: P(5), Fe(3), S(-2), etc.
+    #
+    # WARNING: For anaerobic conditions, users MUST specify sulfide as "S(-2)" not "S"
+    # because "S" maps to sulfate S(6), which removes the key reducing agent!
     ELEMENT_MAPPING = {
         # "P": "P",  # Phosphorus - don't remap, minteq.v4.dat uses P as master species
         "N": "N(5)",  # Nitrogen as nitrate (use N(-3) for ammonia)
         "Fe": "Fe(2)",  # Iron defaults to ferrous (use Fe(3) for ferric)
-        "S": "S(6)",  # Sulfur as sulfate (use S(-2) for sulfide)
+        "S": "S(6)",  # Sulfur as sulfate - USE "S(-2)" for sulfide in anaerobic!
         "As": "As(5)",  # Arsenic as arsenate
         "Mn": "Mn(2)",  # Manganese as Mn2+
         "Cr": "Cr(6)",  # Chromium as chromate
     }
+
+    # Check for common anaerobic input mistakes - warn if "S" used without valence
+    # when pe suggests anaerobic conditions
+    pe_value = solution_data.get("pe", 4.0)
+    analysis = solution_data.get("analysis", {})
+    if pe_value < 0 and "S" in analysis and "S(-2)" not in analysis:
+        logger.warning(
+            "Anaerobic conditions (pe < 0) detected but 'S' used without valence. "
+            "'S' maps to sulfate S(6), not sulfide. For anaerobic digesters, "
+            "use 'S(-2)' for sulfide to enable Fe reduction and FeS precipitation."
+        )
     # Use defaults from schema if not provided
     lines.append(f"    temp      {solution_data.get('temperature_celsius', 25.0)}")
     lines.append(f"    pressure  {solution_data.get('pressure_atm', 1.0)}")
@@ -48,6 +87,12 @@ def build_solution_block(solution_data: Dict[str, Any], solution_num: int = 1, s
 
     if "density" in solution_data and solution_data["density"] is not None:
         lines.append(f"    density   {solution_data['density']}")
+
+    # NOTE: Auto-redox couple detection has been removed.
+    # pe is now constrained using the Fix_pe pseudo-phase in EQUILIBRIUM_PHASES
+    # for both anaerobic and aerobic modes. This provides more robust pe control
+    # than relying on sulfide redox couple, which has insufficient buffering
+    # capacity against oxidizing agents like FeCl3.
 
     # Handle pH/pe/charge balance priority
     if "charge_balance" in solution_data and solution_data["charge_balance"]:
@@ -152,8 +197,7 @@ def build_reaction_block(reactants: List[Dict[str, Any]], reaction_num: int = 1)
     # FAIL LOUDLY: No valid reactants is an error, not a silent no-op
     if not formula_lines:
         raise InputValidationError(
-            "No valid reactants provided for REACTION block. "
-            "Each reactant must have 'formula' and 'amount' fields."
+            "No valid reactants provided for REACTION block. " "Each reactant must have 'formula' and 'amount' fields."
         )
 
     # Add formula lines to reaction block
@@ -224,8 +268,112 @@ def build_equilibrium_phases_block(
         if allow_empty:
             return ""
         raise InputValidationError(
-            "No valid phases provided for EQUILIBRIUM_PHASES block. "
-            "Each phase must have a 'name' field."
+            "No valid phases provided for EQUILIBRIUM_PHASES block. " "Each phase must have a 'name' field."
+        )
+    return "\n".join(lines) + "\n"
+
+
+def build_equilibrium_phases_with_pe_constraint(
+    phases: List[Dict[str, Any]],
+    pe_constraint: Optional[Dict[str, Any]] = None,
+    block_num: int = 1,
+    allow_empty: bool = False,
+    precipitation_only: bool = True,
+) -> str:
+    """
+    Builds an EQUILIBRIUM_PHASES block with optional pe constraint.
+
+    This function extends build_equilibrium_phases_block() to include pe
+    constraint pseudo-phases for thermodynamically correct redox modeling.
+
+    pe constraint methods:
+    - "fix_pe": Uses Fix_pe pseudo-phase to maintain constant pe
+      (models system with sufficient reducing/oxidizing capacity)
+    - "o2_equilibrium": Equilibrates with O2(g) at specified partial pressure
+      (thermodynamically correct for aerobic conditions)
+    - "none" or None: No pe constraint (pe determined by solution equilibrium)
+
+    Args:
+        phases: List of phase definitions with 'name', optional 'target_si', 'initial_moles'
+        pe_constraint: Dict with pe constraint specification:
+            {
+                "method": "fix_pe" | "o2_equilibrium" | "none",
+                "target_pe": float,  # Required for fix_pe method
+                "o2_si": float,      # Required for o2_equilibrium (log pO2, e.g., -0.68 for atmospheric)
+            }
+        block_num: Block number for PHREEQC
+        allow_empty: If True, return empty string for no valid phases
+        precipitation_only: If True (default), minerals can only precipitate
+
+    Returns:
+        PHREEQC EQUILIBRIUM_PHASES block string with pe constraint if specified
+
+    Example:
+        >>> pe_constraint = {"method": "fix_pe", "target_pe": -4.0}
+        >>> phases = [{"name": "Vivianite", "target_si": 0.0}]
+        >>> result = build_equilibrium_phases_with_pe_constraint(phases, pe_constraint)
+        # Returns block with Fix_pe at SI=4.0 (= -target_pe) to fix pe at -4.0
+    """
+    # Default initial_moles based on mode
+    default_initial_moles = 0.0 if precipitation_only else 10.0
+
+    lines = [f"EQUILIBRIUM_PHASES {block_num}"]
+    valid_phases = False
+
+    # Add pe constraint phase first (if specified)
+    if pe_constraint and pe_constraint.get("method"):
+        method = pe_constraint.get("method")
+
+        if method == "fix_pe":
+            # Fix_pe pseudo-phase: target value is pe directly (not SI!)
+            # Based on USGS PHREEQC Ca-As-Mahoney.out example:
+            #   Fix_e- 10.0335... O2(g) 100  -> results in pe = -10.034
+            # The input value is -pe (i.e., log a(e-)), not SI
+            # So for target pe=-4, use value=4.0; for target pe=4, use value=-4.0
+            target_pe = pe_constraint.get("target_pe", 0.0)
+            fix_value = -target_pe  # Input value = -pe = log(a_e-)
+
+            # WARNING: For reducing conditions (pe < 0), O2(g) as reactant may cause
+            # pe drift because O2 is an oxidant and cannot maintain reducing conditions.
+            # PHREEQC would need pO2 → 0 to achieve low pe, which is numerically difficult.
+            # However, we still use O2(g) because H2(g) is NOT in minteq.v4.dat database,
+            # and this approach works reasonably well with force_equality.
+            if target_pe < 0:
+                logger.debug(
+                    f"Fix_pe at pe={target_pe:.1f} using O2(g) with force_equality. "
+                    "This maintains reducing conditions despite O2(g) being an oxidant."
+                )
+
+            # Use O2(g) as reactant with force_equality to improve pe control
+            # Large initial moles (100) allows both directions of adjustment.
+            lines.append(f"    Fix_pe          {fix_value:.4f} O2(g) 100")
+            lines.append(f"        -force_equality true")
+            valid_phases = True
+            logger.info(f"Added Fix_pe constraint: value={fix_value:.4f} (target pe={target_pe:.1f}) using O2(g)")
+
+        elif method == "o2_equilibrium":
+            # O2(g) equilibrium for aerobic conditions
+            # SI = log(pO2), e.g., -0.68 for atmospheric (pO2 = 0.21 atm)
+            o2_si = pe_constraint.get("o2_si", -0.68)  # Default: atmospheric
+            # Use moderate initial_moles to avoid overwhelming the solver
+            lines.append(f"    O2(g)           {o2_si:<8.2f} 1.0")
+            valid_phases = True
+            logger.info(f"Added O2(g) equilibrium constraint: SI={o2_si:.2f}")
+
+    # Add mineral phases
+    for phase_info in phases:
+        name = phase_info.get("name")
+        if name:
+            target_si = phase_info.get("target_si", 0.0)
+            initial_moles = phase_info.get("initial_moles", default_initial_moles)
+            lines.append(f"    {name:<15} {target_si:<8} {initial_moles}")
+            valid_phases = True
+
+    if not valid_phases:
+        if allow_empty:
+            return ""
+        raise InputValidationError(
+            "No valid phases provided for EQUILIBRIUM_PHASES block. " "Each phase must have a 'name' field."
         )
     return "\n".join(lines) + "\n"
 
@@ -246,8 +394,7 @@ def build_mix_block(mix_num: int, solution_map: Dict[int, float]) -> str:
     """
     if not solution_map:
         raise InputValidationError(
-            "Empty solution_map provided for MIX block. "
-            "At least one solution with a fraction/volume is required."
+            "Empty solution_map provided for MIX block. " "At least one solution with a fraction/volume is required."
         )
     lines = [f"MIX {mix_num}"]
     for sol_num, factor in solution_map.items():
@@ -290,7 +437,7 @@ def build_gas_phase_block(gas_def: Dict[str, Any], block_num: int = 1) -> str:
         raise GasPhaseError(
             f"Unknown gas phase type: '{gas_type}'. Valid types are 'fixed_pressure' or 'fixed_volume'.",
             gas_components=gas_def.get("initial_components"),
-            issue=f"Invalid type: {gas_type}"
+            issue=f"Invalid type: {gas_type}",
         )
 
     # FAIL LOUDLY: No gas components is an error
@@ -300,7 +447,7 @@ def build_gas_phase_block(gas_def: Dict[str, Any], block_num: int = 1) -> str:
             "No gas components defined in GAS_PHASE block. "
             "At least one component is required in 'initial_components'.",
             gas_components=gas_def.get("initial_components"),
-            issue="No components defined"
+            issue="No components defined",
         )
     return "\n".join(lines) + "\n"
 
@@ -429,10 +576,9 @@ def build_surface_block(surface_def: Dict[str, Any], block_num: int = 1) -> str:
         # FAIL LOUDLY: No valid site definitions is an error
         if valid_site_count == 0:
             raise SurfaceDefinitionError(
-                "No valid site definitions found for SURFACE block. "
-                "Each site must have at least a 'name' field.",
+                "No valid site definitions found for SURFACE block. " "Each site must have at least a 'name' field.",
                 missing_fields=["name"] if skipped_sites else None,
-                invalid_fields={"skipped_sites": ", ".join(skipped_sites)} if skipped_sites else None
+                invalid_fields={"skipped_sites": ", ".join(skipped_sites)} if skipped_sites else None,
             )
 
         # Add SURFACE_MASTER_SPECIES and SURFACE_SPECIES blocks if provided
@@ -448,7 +594,7 @@ def build_surface_block(surface_def: Dict[str, Any], block_num: int = 1) -> str:
             "Invalid surface definition provided. "
             "Provide either 'surface_block_string' for raw input, or "
             "'sites'/'sites_info' for structured input.",
-            missing_fields=["surface_block_string", "sites", "sites_info"]
+            missing_fields=["surface_block_string", "sites", "sites_info"],
         )
 
 
@@ -579,7 +725,7 @@ def build_kinetics_block(kinetics_def: Dict[str, Any], time_def: Dict[str, Any],
         raise KineticsDefinitionError(
             "No kinetics reactions defined. Provide either 'kinetics_block_string' "
             "for raw PHREEQC input, or 'reactions' list with structured definitions.",
-            missing_fields=missing_fields
+            missing_fields=missing_fields,
         )
 
     # Step 3: Add time steps
@@ -750,13 +896,11 @@ def build_phase_linked_surface_block(
     """
     if not surface_name:
         raise SurfaceDefinitionError(
-            "Surface name required for phase-linked SURFACE block",
-            missing_fields=["surface_name"]
+            "Surface name required for phase-linked SURFACE block", missing_fields=["surface_name"]
         )
     if not phase_name:
         raise SurfaceDefinitionError(
-            "Phase name required for phase-linked SURFACE block",
-            missing_fields=["phase_name"]
+            "Phase name required for phase-linked SURFACE block", missing_fields=["phase_name"]
         )
 
     # Determine binding-site formula names based on database
@@ -774,14 +918,10 @@ def build_phase_linked_surface_block(
 
     # Strong sites - phase linked
     # Format: <site> <phase> equilibrium_phase <sites_per_mole> <specific_area>
-    lines.append(
-        f"    {strong_site}  {phase_name}  equilibrium_phase  {sites_per_mole}  {specific_area_per_mole}"
-    )
+    lines.append(f"    {strong_site}  {phase_name}  equilibrium_phase  {sites_per_mole}  {specific_area_per_mole}")
 
     # Weak sites - phase linked (same phase, higher site density)
-    lines.append(
-        f"    {weak_site}  {phase_name}  equilibrium_phase  {weak_sites_per_mole}  {specific_area_per_mole}"
-    )
+    lines.append(f"    {weak_site}  {phase_name}  equilibrium_phase  {weak_sites_per_mole}  {specific_area_per_mole}")
 
     # Optional: disable EDL for simpler/faster calculations
     if no_edl:

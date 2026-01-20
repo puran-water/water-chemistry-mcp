@@ -5,13 +5,13 @@ This module contains metadata about PHREEQC thermodynamic databases,
 including their sources, versions, and download URLs.
 """
 
+import json
 import logging
 import os
-import json
-from typing import Dict, List, Optional, Set, Union, Any
+from typing import Any, Dict, List, Optional, Set, Union
 
 # Path constants
-from .database_downloader import DATABASE_DIR, OFFICIAL_DIR, CUSTOM_DIR, CACHED_DIR, METADATA_DIR
+from .database_downloader import CACHED_DIR, CUSTOM_DIR, DATABASE_DIR, METADATA_DIR, OFFICIAL_DIR
 
 logger = logging.getLogger(__name__)
 

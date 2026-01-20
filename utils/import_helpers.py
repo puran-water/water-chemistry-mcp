@@ -2,10 +2,10 @@
 Helper functions for checking and importing dependencies.
 """
 
+import glob
 import logging
 import os
 import sys
-import glob
 from typing import List, Optional
 
 # Path to the USGS PHREEQC database files - check environment variables first, then fallback paths
@@ -164,9 +164,7 @@ def get_available_database_paths() -> List[str]:
                                 logger.debug(f"Found additional PhreeqPython database: {db_path}")
 
                     if available_dbs:
-                        logger.info(
-                            f"Found {len(available_dbs)} databases in PhreeqPython package"
-                        )
+                        logger.info(f"Found {len(available_dbs)} databases in PhreeqPython package")
                         break
         except Exception as e:
             logger.debug(f"Error searching PhreeqPython package for databases: {e}")

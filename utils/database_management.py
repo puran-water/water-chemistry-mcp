@@ -4,14 +4,14 @@ Database management module for PHREEQC.
 Provides centralized functionality for database selection, validation, and information.
 """
 
+import glob
+import json
 import logging
 import os
 import shutil
-import glob
-import json
 from typing import Dict, List, Optional, Tuple, Union
 
-from .import_helpers import get_available_database_paths, get_default_database, USGS_PHREEQC_DATABASE_PATH
+from .import_helpers import USGS_PHREEQC_DATABASE_PATH, get_available_database_paths, get_default_database
 from .mineral_registry import COMMON_MINERALS, DATABASE_SPECIFIC_MINERALS
 
 # Import database cache functions - will be imported later to avoid circular imports
@@ -283,9 +283,7 @@ class DatabaseManager:
         # Fallback to default
         return self.default_database or ""
 
-    def resolve_and_validate_database(
-        self, database_path: Optional[str], category: str = "general"
-    ) -> str:
+    def resolve_and_validate_database(self, database_path: Optional[str], category: str = "general") -> str:
         """
         Centralized database resolution with validation and fallback.
 
@@ -311,9 +309,7 @@ class DatabaseManager:
                 logger.debug(f"Using resolved database path: {resolved_path}")
                 return resolved_path
             else:
-                logger.warning(
-                    f"Invalid database path: {database_path}, using recommended database instead"
-                )
+                logger.warning(f"Invalid database path: {database_path}, using recommended database instead")
 
         # Fallback to recommended database for the category
         recommended_db = self.recommend_database(category)

@@ -2,14 +2,15 @@
 Tool for calculating solution speciation and equilibrium.
 """
 
-import logging
-from typing import Dict, Any, Optional
 import asyncio
+import logging
+from typing import Any, Dict, Optional
 
 from utils.database_management import database_manager
+from utils.helpers import build_selected_output_block, build_solution_block
+
+from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
 from .schemas import CalculateSolutionSpeciationInput, CalculateSolutionSpeciationOutput
-from .phreeqc_wrapper import run_phreeqc_simulation, PhreeqcError
-from utils.helpers import build_solution_block, build_selected_output_block
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +46,7 @@ async def calculate_solution_speciation(input_data: Dict[str, Any]) -> Dict[str,
         return {"error": f"Input validation error: {e}"}
 
     # Centralized database resolution with validation and fallback
-    database_path = database_manager.resolve_and_validate_database(
-        input_model.database, category="general"
-    )
+    database_path = database_manager.resolve_and_validate_database(input_model.database, category="general")
 
     try:
         # Build PHREEQC input

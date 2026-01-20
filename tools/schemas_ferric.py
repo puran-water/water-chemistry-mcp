@@ -5,11 +5,11 @@ This module defines the Pydantic models for the calculate_ferric_dose_for_tp too
 which models Fe-P precipitation with surface complexation and redox awareness.
 """
 
-from typing import Optional, List, Dict, Any, Literal
+from typing import Any, Dict, List, Literal, Optional
+
 from pydantic import BaseModel, Field, validator
 
-from .schemas import WaterAnalysisInput, SolutionOutput
-
+from .schemas import SolutionOutput, WaterAnalysisInput
 
 # --- Redox Mode Definitions ---
 
@@ -92,6 +92,7 @@ class RedoxSpecification(BaseModel):
 
 # --- Surface Complexation Options ---
 
+
 class SurfaceComplexationOptions(BaseModel):
     """Options for HFO surface complexation modeling."""
 
@@ -126,6 +127,7 @@ class SurfaceComplexationOptions(BaseModel):
 
 # --- Binary Search Options ---
 
+
 class BinarySearchOptions(BaseModel):
     """Options for binary search dose optimization."""
 
@@ -153,6 +155,7 @@ class BinarySearchOptions(BaseModel):
 
 
 # --- pH Adjustment Options ---
+
 
 class PhAdjustmentOptions(BaseModel):
     """Options for pH adjustment during coagulation.
@@ -200,6 +203,7 @@ class PhAdjustmentOptions(BaseModel):
 
 
 # --- Main Input Schema ---
+
 
 class CalculateFerricDoseInput(BaseModel):
     """Input for ferric dose calculation to achieve target TP."""
@@ -285,34 +289,28 @@ class CalculateFerricDoseInput(BaseModel):
         if initial_solution and initial_solution.analysis:
             initial_p = initial_solution.analysis.get("P", initial_solution.analysis.get("P(5)", 0))
             if isinstance(initial_p, (int, float)) and v >= initial_p:
-                raise ValueError(
-                    f"Target P ({v} mg/L) must be less than initial P ({initial_p} mg/L)"
-                )
+                raise ValueError(f"Target P ({v} mg/L) must be less than initial P ({initial_p} mg/L)")
         return v
 
 
 # --- Partitioning Output ---
+
 
 class PhosphatePartitioning(BaseModel):
     """Phosphate partitioning between phases."""
 
     dissolved_p_mmol: float = Field(..., description="Dissolved P in mmol/L.")
     dissolved_p_mg_l: float = Field(..., description="Dissolved P in mg/L as P.")
-    adsorbed_p_mmol: Optional[float] = Field(
-        None, description="P adsorbed on HFO surface in mmol/L."
-    )
-    precipitated_p_mmol: Optional[float] = Field(
-        None, description="P in precipitated phases in mmol/L."
-    )
+    adsorbed_p_mmol: Optional[float] = Field(None, description="P adsorbed on HFO surface in mmol/L.")
+    precipitated_p_mmol: Optional[float] = Field(None, description="P in precipitated phases in mmol/L.")
     precipitated_phases: Optional[Dict[str, float]] = Field(
         None, description="Moles of each precipitated phase containing P."
     )
-    total_p_removal_percent: Optional[float] = Field(
-        None, description="Total P removal as percentage of initial P."
-    )
+    total_p_removal_percent: Optional[float] = Field(None, description="Total P removal as percentage of initial P.")
 
 
 # --- Mechanistic Partition Output (NEW) ---
+
 
 class MechanisticPartition(BaseModel):
     """Detailed mechanistic partition showing WHERE P and Fe ended up.
@@ -324,35 +322,19 @@ class MechanisticPartition(BaseModel):
     """
 
     # Phosphorus partitioning (mmol/L)
-    p_on_hfo_surfaces_mmol: float = Field(
-        ..., description="P adsorbed on HFO surfaces (mmol/L)."
-    )
-    p_in_strengite_mmol: float = Field(
-        ..., description="P in Strengite precipitate (mmol/L)."
-    )
-    p_in_vivianite_mmol: float = Field(
-        ..., description="P in Vivianite precipitate (mmol/L)."
-    )
-    p_dissolved_mmol: float = Field(
-        ..., description="Residual dissolved P (mmol/L)."
-    )
+    p_on_hfo_surfaces_mmol: float = Field(..., description="P adsorbed on HFO surfaces (mmol/L).")
+    p_in_strengite_mmol: float = Field(..., description="P in Strengite precipitate (mmol/L).")
+    p_in_vivianite_mmol: float = Field(..., description="P in Vivianite precipitate (mmol/L).")
+    p_dissolved_mmol: float = Field(..., description="Residual dissolved P (mmol/L).")
 
     # Iron partitioning (mmol/L)
-    fe_in_ferrihydrite_mmol: float = Field(
-        ..., description="Fe in Ferrihydrite/Fe(OH)3 (mmol/L)."
-    )
+    fe_in_ferrihydrite_mmol: float = Field(..., description="Fe in Ferrihydrite/Fe(OH)3 (mmol/L).")
     fe_in_vivianite_mmol: float = Field(
         ..., description="Fe in Vivianite (mmol/L). Note: Vivianite = Fe3(PO4)2, so 3 Fe per formula."
     )
-    fe_in_fes_mmol: float = Field(
-        ..., description="Fe in FeS (mackinawite/amorphous) (mmol/L)."
-    )
-    fe_in_siderite_mmol: float = Field(
-        ..., description="Fe in Siderite FeCO3 (mmol/L)."
-    )
-    fe_dissolved_mmol: float = Field(
-        ..., description="Residual dissolved Fe (mmol/L)."
-    )
+    fe_in_fes_mmol: float = Field(..., description="Fe in FeS (mackinawite/amorphous) (mmol/L).")
+    fe_in_siderite_mmol: float = Field(..., description="Fe in Siderite FeCO3 (mmol/L).")
+    fe_dissolved_mmol: float = Field(..., description="Residual dissolved Fe (mmol/L).")
 
     # Mechanism attribution
     p_removal_dominant_mechanism: str = Field(
@@ -360,14 +342,10 @@ class MechanisticPartition(BaseModel):
         description=(
             "Dominant P removal mechanism: 'adsorption' (HFO surface), "
             "'precipitation' (Strengite/Vivianite), or 'mixed' (both contribute)."
-        )
+        ),
     )
-    p_removal_by_adsorption_percent: float = Field(
-        ..., description="Percentage of removed P via adsorption."
-    )
-    p_removal_by_precipitation_percent: float = Field(
-        ..., description="Percentage of removed P via precipitation."
-    )
+    p_removal_by_adsorption_percent: float = Field(..., description="Percentage of removed P via adsorption.")
+    p_removal_by_precipitation_percent: float = Field(..., description="Percentage of removed P via precipitation.")
 
 
 class MarginalFePRatio(BaseModel):
@@ -378,16 +356,12 @@ class MarginalFePRatio(BaseModel):
     the cost of pushing to lower P targets.
     """
 
-    value_molar: float = Field(
-        ..., description="Marginal dFe/dP in molar ratio (mmol Fe per mmol P removed)."
-    )
+    value_molar: float = Field(..., description="Marginal dFe/dP in molar ratio (mmol Fe per mmol P removed).")
     description: str = Field(
-        default="Additional Fe per additional P removed at current target",
-        description="What this metric represents."
+        default="Additional Fe per additional P removed at current target", description="What this metric represents."
     )
     interpretation: str = Field(
-        ...,
-        description="Interpretation guidance (e.g., 'High values (>5) indicate diminishing returns')."
+        ..., description="Interpretation guidance (e.g., 'High values (>5) indicate diminishing returns')."
     )
 
 
@@ -396,9 +370,7 @@ class IronPartitioning(BaseModel):
 
     dissolved_fe_mmol: float = Field(..., description="Dissolved Fe in mmol/L.")
     dissolved_fe_mg_l: float = Field(..., description="Dissolved Fe in mg/L.")
-    precipitated_fe_mmol: Optional[float] = Field(
-        None, description="Fe in precipitated phases in mmol/L."
-    )
+    precipitated_fe_mmol: Optional[float] = Field(None, description="Fe in precipitated phases in mmol/L.")
     precipitated_phases: Optional[Dict[str, float]] = Field(
         None, description="Moles of each precipitated phase containing Fe."
     )
@@ -446,9 +418,7 @@ class FerricDoseOptimizationSummary(BaseModel):
     )
     redox_mode_used: str = Field(..., description="Redox mode that was applied.")
     pe_used: Optional[float] = Field(None, description="pe value used in simulation.")
-    surface_complexation_enabled: bool = Field(
-        ..., description="Whether surface complexation was enabled."
-    )
+    surface_complexation_enabled: bool = Field(..., description="Whether surface complexation was enabled.")
     optimization_path: Optional[List[Dict[str, Any]]] = Field(
         None, description="Binary search iteration history for debugging."
     )
@@ -462,6 +432,7 @@ FerricDoseStatus = Literal["success", "infeasible", "input_error"]
 
 # --- Infeasible Response ---
 
+
 class InfeasibleResponse(BaseModel):
     """Response when target cannot be achieved."""
 
@@ -470,12 +441,11 @@ class InfeasibleResponse(BaseModel):
     best_achieved: Optional[Dict[str, float]] = Field(
         None, description="Best achieved result before giving up (fe_dose_mg_l, residual_p_mg_l)."
     )
-    suggestions: Optional[List[str]] = Field(
-        None, description="Suggestions for resolving the infeasibility."
-    )
+    suggestions: Optional[List[str]] = Field(None, description="Suggestions for resolving the infeasibility.")
 
 
 # --- Main Output Schema ---
+
 
 class CalculateFerricDoseOutput(SolutionOutput):
     """Output from ferric dose calculation."""
@@ -483,9 +453,7 @@ class CalculateFerricDoseOutput(SolutionOutput):
     status: FerricDoseStatus = Field(
         "success", description="Operation status: 'success', 'infeasible', or 'input_error'."
     )
-    error_message: Optional[str] = Field(
-        None, description="Error message if status is not 'success'."
-    )
+    error_message: Optional[str] = Field(None, description="Error message if status is not 'success'.")
     suggestions: Optional[List[str]] = Field(
         None, description="Suggestions for resolving issues (if status is 'infeasible')."
     )
@@ -503,21 +471,21 @@ class CalculateFerricDoseOutput(SolutionOutput):
         description=(
             "Detailed mechanistic breakdown showing WHERE P and Fe went. "
             "Use to verify whether removal is adsorption-driven or precipitation-driven."
-        )
+        ),
     )
     marginal_fe_to_p: Optional[MarginalFePRatio] = Field(
         None,
         description=(
             "Marginal Fe:P ratio (dFe/dP) at current operating point. "
             "Shows incremental cost of pushing to lower P targets."
-        )
+        ),
     )
     sulfide_assumption: Optional[str] = Field(
         None,
         description=(
             "Sulfide modeling assumption: 'sulfide_free_limit' (no S(-2) specified, "
             "represents optimistic lower bound) or 'with_sulfide' (FeS competition modeled)."
-        )
+        ),
     )
     precipitated_phases: Optional[Dict[str, float]] = Field(
         None, description="All precipitated phases and their amounts in mmol."
@@ -525,21 +493,14 @@ class CalculateFerricDoseOutput(SolutionOutput):
     final_conditions: Optional[Dict[str, Any]] = Field(
         None, description="Final conditions including pH, pe, ionic strength."
     )
-    database_used: Optional[str] = Field(
-        None, description="PHREEQC database that was used."
-    )
-    warnings: Optional[List[str]] = Field(
-        None, description="Non-fatal warnings from the simulation."
-    )
+    database_used: Optional[str] = Field(None, description="PHREEQC database that was used.")
+    warnings: Optional[List[str]] = Field(None, description="Non-fatal warnings from the simulation.")
 
 
 # --- Utility Functions ---
 
-def orp_to_pe(
-    orp_mv: float,
-    temperature_celsius: float = 25.0,
-    reference: str = "SHE"
-) -> float:
+
+def orp_to_pe(orp_mv: float, temperature_celsius: float = 25.0, reference: str = "SHE") -> float:
     """
     Convert ORP (mV vs reference) to pe.
 

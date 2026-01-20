@@ -26,6 +26,15 @@ Key precipitates:
 - FeS(ppt) / Mackinawite: Iron sulfide under sulfidic conditions
 - Siderite: FeCO3, iron carbonate under high alkalinity
 - Al(OH)3(a) / Gibbsite: Amorphous aluminum hydroxide (HAO), adsorption substrate
+
+ANAEROBIC EFFICIENCY NOTE:
+Anaerobic Fe-P precipitation via Vivianite can be more Fe-efficient
+(1.5 Fe:P vs 1-3 Fe:P) ONLY when:
+1. Sulfide is absent (<0.1 mg/L S(-2)) - FeS competes for Fe
+2. Vivianite precipitation is kinetically favorable
+3. pe is maintained consistently
+
+With significant sulfide, FeS formation makes anaerobic LESS efficient.
 """
 
 import logging
@@ -93,6 +102,39 @@ PHASE_NAME_BY_DATABASE: Dict[str, Dict[str, Optional[str]]] = {
 }
 
 
+# Fe(III) phases that are thermodynamically unstable at reducing conditions
+FE3_PHASES = {"Ferrihydrite", "Fe(OH)3(a)", "Strengite"}
+
+
+def validate_phase_redox_consistency(phases: List[Dict], pe: float) -> List[str]:
+    """
+    Check for Fe(III) phases at reducing pe and return warnings.
+
+    Fe(III) phases (Ferrihydrite, Fe(OH)3(a), Strengite) are thermodynamically
+    unstable below pe ≈ -2. If these phases are included in a simulation with
+    low pe, the model may give unrealistic results.
+
+    Args:
+        phases: List of phase dicts with 'name' keys
+        pe: Target pe value for the simulation
+
+    Returns:
+        List of warning messages (empty if no issues)
+    """
+    warnings = []
+
+    if pe < -2:
+        fe3_phases_present = [p["name"] for p in phases if p.get("name") in FE3_PHASES]
+        if fe3_phases_present:
+            warnings.append(
+                f"Thermodynamic warning: Fe(III) phases {fe3_phases_present} at pe={pe:.1f}. "
+                f"Fe(III) is unstable below pe=-2; consider ferrous coagulant (FeSO4, FeCl2) "
+                f"or check if pe is appropriate for your system."
+            )
+
+    return warnings
+
+
 def get_phase_name(canonical_name: str, database: str = "minteq.v4.dat") -> Optional[str]:
     """
     Get the database-specific phase name for a canonical phase.
@@ -143,34 +185,39 @@ def get_aerobic_phases(
     if include_hfo:
         hfo_name = get_phase_name("ferric_hydroxide", database)
         if hfo_name:
-            phases.append({
-                "name": hfo_name,
-                "target_si": 0.0,
-                "initial_moles": 0.0,  # Precipitation only
-            })
+            phases.append(
+                {
+                    "name": hfo_name,
+                    "target_si": 0.0,
+                    "initial_moles": 0.0,  # Precipitation only
+                }
+            )
 
     if include_strengite:
         strengite_name = get_phase_name("ferric_phosphate", database)
         if strengite_name:
-            phases.append({
-                "name": strengite_name,
-                "target_si": 0.0,
-                "initial_moles": 0.0,
-            })
+            phases.append(
+                {
+                    "name": strengite_name,
+                    "target_si": 0.0,
+                    "initial_moles": 0.0,
+                }
+            )
         else:
             logger.warning(
-                f"Strengite not available in {database}. "
-                "Fe-P removal will rely on adsorption to HFO only."
+                f"Strengite not available in {database}. " "Fe-P removal will rely on adsorption to HFO only."
             )
 
     if include_calcite:
         calcite_name = get_phase_name("calcium_carbonate", database)
         if calcite_name:
-            phases.append({
-                "name": calcite_name,
-                "target_si": 0.0,
-                "initial_moles": 0.0,
-            })
+            phases.append(
+                {
+                    "name": calcite_name,
+                    "target_si": 0.0,
+                    "initial_moles": 0.0,
+                }
+            )
 
     return phases
 
@@ -182,6 +229,7 @@ def get_anaerobic_phases(
     include_siderite: bool = True,
     include_calcite: bool = True,
     sulfide_present: bool = False,
+    calcite_dissolution_buffering: bool = True,
 ) -> List[Dict[str, any]]:
     """
     Get equilibrium phases for anaerobic Fe-P precipitation.
@@ -198,6 +246,9 @@ def get_anaerobic_phases(
         include_siderite: Include Siderite (FeCO3) phase
         include_calcite: Include Calcite for pH buffering
         sulfide_present: If True, prioritize FeS precipitation
+        calcite_dissolution_buffering: If True, allow calcite to dissolve for pH buffering.
+            This is critical for anaerobic digesters where FeCl3 hydrolysis generates
+            significant acidity. Default True for anaerobic mode.
 
     Returns:
         List of phase dicts for build_equilibrium_phases_block()
@@ -207,38 +258,51 @@ def get_anaerobic_phases(
     if include_vivianite:
         vivianite_name = get_phase_name("ferrous_phosphate", database)
         if vivianite_name:
-            phases.append({
-                "name": vivianite_name,
-                "target_si": 0.0,
-                "initial_moles": 0.0,
-            })
+            phases.append(
+                {
+                    "name": vivianite_name,
+                    "target_si": 0.0,
+                    "initial_moles": 0.0,
+                }
+            )
 
     if include_iron_sulfide and sulfide_present:
         fes_name = get_phase_name("iron_sulfide", database)
         if fes_name:
-            phases.append({
-                "name": fes_name,
-                "target_si": 0.0,
-                "initial_moles": 0.0,
-            })
+            phases.append(
+                {
+                    "name": fes_name,
+                    "target_si": 0.0,
+                    "initial_moles": 0.0,
+                }
+            )
 
     if include_siderite:
         siderite_name = get_phase_name("iron_carbonate", database)
         if siderite_name:
-            phases.append({
-                "name": siderite_name,
-                "target_si": 0.0,
-                "initial_moles": 0.0,
-            })
+            phases.append(
+                {
+                    "name": siderite_name,
+                    "target_si": 0.0,
+                    "initial_moles": 0.0,
+                }
+            )
 
     if include_calcite:
         calcite_name = get_phase_name("calcium_carbonate", database)
         if calcite_name:
-            phases.append({
-                "name": calcite_name,
-                "target_si": 0.0,
-                "initial_moles": 0.0,
-            })
+            # For anaerobic digesters, allow calcite dissolution to buffer pH
+            # FeCl3 hydrolysis generates ~3 mol H+ per mol Fe(III), which can
+            # overwhelm alkalinity. Calcite dissolution provides additional buffering.
+            # initial_moles=10 allows up to 10 mmol/L dissolution if needed.
+            calcite_initial_moles = 10.0 if calcite_dissolution_buffering else 0.0
+            phases.append(
+                {
+                    "name": calcite_name,
+                    "target_si": 0.0,
+                    "initial_moles": calcite_initial_moles,
+                }
+            )
 
     return phases
 
@@ -267,20 +331,24 @@ def get_aluminum_phases(
     if include_hao:
         hao_name = get_phase_name("aluminum_hydroxide", database)
         if hao_name:
-            phases.append({
-                "name": hao_name,
-                "target_si": 0.0,
-                "initial_moles": 0.0,  # Precipitation only
-            })
+            phases.append(
+                {
+                    "name": hao_name,
+                    "target_si": 0.0,
+                    "initial_moles": 0.0,  # Precipitation only
+                }
+            )
 
     if include_calcite:
         calcite_name = get_phase_name("calcium_carbonate", database)
         if calcite_name:
-            phases.append({
-                "name": calcite_name,
-                "target_si": 0.0,
-                "initial_moles": 0.0,
-            })
+            phases.append(
+                {
+                    "name": calcite_name,
+                    "target_si": 0.0,
+                    "initial_moles": 0.0,
+                }
+            )
 
     return phases
 
@@ -321,33 +389,58 @@ def get_phases_for_redox_mode(
     redox_mode: str,
     database: str = "minteq.v4.dat",
     sulfide_mg_l: float = 0.0,
-) -> Tuple[List[Dict[str, any]], str]:
+    fix_pe: bool = True,
+) -> Tuple[List[Dict[str, any]], str, Dict[str, any]]:
     """
-    Get appropriate phases based on redox mode.
+    Get appropriate phases and pe constraint based on redox mode.
+
+    This function now returns pe constraint information to enable thermodynamically
+    correct redox modeling. For anaerobic mode, uses Fix_pe pseudo-phase to maintain
+    constant pe (models system with sufficient reducing capacity from COD, etc.).
+    For aerobic mode, can use either Fix_pe or O2(g) equilibrium.
 
     Args:
         redox_mode: One of "aerobic", "anaerobic", "pe_from_orp", "fixed_pe", "fixed_fe2_fraction"
         database: Database filename
         sulfide_mg_l: Sulfide concentration for anaerobic conditions
+        fix_pe: If True (default), constrain pe throughout simulation.
+               If False, pe is set initially but allowed to drift.
 
     Returns:
-        Tuple of (phases_list, hfo_phase_name)
+        Tuple of (phases_list, hfo_phase_name, pe_constraint)
+        pe_constraint is a dict: {"method": "fix_pe"|"o2_equilibrium"|"none", "target_pe": float, "o2_si": float}
     """
     sulfide_present = sulfide_mg_l > 0.1  # 0.1 mg/L threshold
+
+    # Initialize pe_constraint
+    pe_constraint = {"method": "none"} if not fix_pe else None
 
     if redox_mode == "aerobic":
         phases = get_aerobic_phases(database)
         hfo_phase = get_hfo_surface_phase(database)
+        # Aerobic: Use O2(g) equilibrium at atmospheric pO2 for thermodynamically correct pe
+        # SI = log(pO2) = log(0.21) ≈ -0.68
+        if fix_pe:
+            pe_constraint = {
+                "method": "o2_equilibrium",
+                "o2_si": -0.68,  # Atmospheric O2 partial pressure
+                "target_pe": 3.5,  # Typical ORP-based pe for aerated biological treatment
+            }
     elif redox_mode == "anaerobic":
         phases = get_anaerobic_phases(database, sulfide_present=sulfide_present)
         hfo_phase = None  # No HFO under anaerobic conditions
+        # Anaerobic: Use Fix_pe at pe=-4.0 to maintain reducing conditions
+        # This models a system with sufficient reducing capacity (COD, fermentation products)
+        if fix_pe:
+            pe_constraint = {
+                "method": "fix_pe",
+                "target_pe": -4.0,  # Typical anaerobic digester pe
+            }
     else:
         # For pe_from_orp, fixed_pe, or fixed_fe2_fraction:
         # Include both aerobic and anaerobic phases, let PHREEQC decide
         aerobic = get_aerobic_phases(database, include_calcite=False)
-        anaerobic = get_anaerobic_phases(
-            database, sulfide_present=sulfide_present, include_calcite=False
-        )
+        anaerobic = get_anaerobic_phases(database, sulfide_present=sulfide_present, include_calcite=False)
 
         # Combine phases, avoiding duplicates
         phase_names = set()
@@ -364,7 +457,25 @@ def get_phases_for_redox_mode(
 
         hfo_phase = get_hfo_surface_phase(database)
 
-    return phases, hfo_phase
+        # For fixed_pe mode, use Fix_pe at the specified pe value
+        # (pe value will be set by ferric_phosphate.py based on redox specification)
+        if fix_pe and redox_mode == "fixed_pe":
+            # Placeholder - actual target_pe will be set in ferric_phosphate.py
+            pe_constraint = {
+                "method": "fix_pe",
+                "target_pe": 0.0,  # Will be overridden
+            }
+        elif fix_pe and redox_mode == "pe_from_orp":
+            # pe_from_orp: use Fix_pe with calculated pe
+            pe_constraint = {
+                "method": "fix_pe",
+                "target_pe": 0.0,  # Will be overridden based on ORP
+            }
+        else:
+            # fixed_fe2_fraction or fix_pe=False: no pe constraint
+            pe_constraint = {"method": "none"}
+
+    return phases, hfo_phase, pe_constraint
 
 
 # Stoichiometry constants for metal-P precipitation
@@ -405,8 +516,7 @@ def estimate_initial_fe_dose(
     else:
         # Aerobic: Mix of Strengite (1:1) and adsorption (2:1)
         # Use weighted average assuming 50/50 split
-        fe_per_p = (STOICHIOMETRY["Strengite"]["metal_per_P"] +
-                    STOICHIOMETRY["Fe_adsorption"]["metal_per_P"]) / 2
+        fe_per_p = (STOICHIOMETRY["Strengite"]["metal_per_P"] + STOICHIOMETRY["Fe_adsorption"]["metal_per_P"]) / 2
 
     return target_p_removal_mmol * fe_per_p * safety_factor
 
@@ -463,22 +573,29 @@ def get_phases_for_coagulant(
     redox_mode: str = "aerobic",
     database: str = "minteq.v4.dat",
     sulfide_mg_l: float = 0.0,
-) -> Tuple[List[Dict[str, any]], Optional[str], str]:
+    fix_pe: bool = True,
+) -> Tuple[List[Dict[str, any]], Optional[str], str, Dict[str, any]]:
     """
-    Get appropriate phases based on coagulant type (Fe or Al).
+    Get appropriate phases and pe constraint based on coagulant type (Fe or Al).
+
+    This function returns pe constraint information for thermodynamically correct
+    redox modeling. For anaerobic mode with ferric coagulant, the Fix_pe pseudo-phase
+    maintains pe at -4.0, preventing pe drift when FeCl3 is added.
 
     Args:
         coagulant_formula: Coagulant formula (e.g., "FeCl3", "AlCl3", "Al2(SO4)3")
         redox_mode: One of "aerobic", "anaerobic", "pe_from_orp", "fixed_pe", "fixed_fe2_fraction"
         database: Database filename
         sulfide_mg_l: Sulfide concentration for anaerobic conditions (Fe only)
+        fix_pe: If True (default), constrain pe throughout simulation
 
     Returns:
-        Tuple of (phases_list, surface_phase_name, surface_type)
+        Tuple of (phases_list, surface_phase_name, surface_type, pe_constraint)
         surface_type is "Hfo" for Fe or "Hao" for Al
+        pe_constraint is a dict: {"method": "fix_pe"|"o2_equilibrium"|"none", ...}
     """
     # Import here to avoid circular dependency
-    from tools.schemas_ferric import get_coagulant_metal
+    from tools.schemas_ferric import COAGULANT_DEFINITIONS, get_coagulant_metal
 
     metal_type = get_coagulant_metal(coagulant_formula)
 
@@ -494,8 +611,69 @@ def get_phases_for_coagulant(
             "AlPO4/Variscite phases are not available in standard PHREEQC databases."
         )
 
-        return phases, surface_phase, surface_type
+        # Al coagulants: no pe constraint (Al chemistry less redox-sensitive)
+        pe_constraint = {"method": "none"}
+        return phases, surface_phase, surface_type, pe_constraint
     else:
-        # Iron coagulant - use existing Fe logic
-        phases, hfo_phase = get_phases_for_redox_mode(redox_mode, database, sulfide_mg_l)
-        return phases, hfo_phase, "Hfo"
+        # Iron coagulant - check oxidation state for special handling
+        coag_info = COAGULANT_DEFINITIONS.get(coagulant_formula, {})
+        oxidation_state = coag_info.get("oxidation_state", 3)  # Default to ferric
+
+        # CRITICAL FIX: When using ferric (Fe3+) coagulant in anaerobic mode,
+        # include BOTH aerobic and anaerobic phases. This is necessary because:
+        # 1. FeCl3 adds Fe(III) which may not fully reduce to Fe(II) without
+        #    sufficient reducing capacity (sulfide, etc.)
+        # 2. If pe rises due to Fe(III) addition and no P sink is available
+        #    (only Fe(II) phases), the binary search goes haywire
+        # 3. Including both phase sets allows Ferrihydrite/Strengite to form
+        #    as a fallback if Fe(II) phases (Vivianite) can't precipitate
+        #
+        # The Fix_pe constraint at pe=-4.0 is CRITICAL here - it prevents pe drift
+        # when FeCl3 oxidizes the solution, modeling the digester's reducing capacity.
+        if redox_mode == "anaerobic" and oxidation_state == 3:
+            logger.info(
+                f"Ferric coagulant ({coagulant_formula}) in anaerobic mode: "
+                "including both Fe(II) and Fe(III) phases with Fix_pe constraint. "
+                "pe will be maintained at -4.0 (models digester reducing capacity)."
+            )
+            # Use the same logic as fixed_pe/pe_from_orp: include both phase sets
+            sulfide_present = sulfide_mg_l > 0.1
+            aerobic = get_aerobic_phases(database, include_calcite=False)
+            anaerobic = get_anaerobic_phases(
+                database, sulfide_present=sulfide_present, include_calcite=False, calcite_dissolution_buffering=True
+            )
+
+            # Combine phases, avoiding duplicates
+            phase_names = set()
+            phases = []
+            for p in aerobic + anaerobic:
+                if p["name"] not in phase_names:
+                    phases.append(p)
+                    phase_names.add(p["name"])
+
+            # Add calcite with dissolution buffering
+            calcite = get_phase_name("calcium_carbonate", database)
+            if calcite and calcite not in phase_names:
+                phases.append({"name": calcite, "target_si": 0.0, "initial_moles": 10.0})
+
+            # Enable HFO surface complexation since Fe(III) may be present
+            hfo_phase = get_hfo_surface_phase(database)
+
+            # CRITICAL: Use Fix_pe to maintain anaerobic pe even with ferric coagulant
+            # This models the digester's reducing capacity (COD, fermentation products)
+            # that maintains low pe despite the oxidizing effect of FeCl3
+            if fix_pe:
+                pe_constraint = {
+                    "method": "fix_pe",
+                    "target_pe": -4.0,  # Anaerobic digester pe
+                }
+            else:
+                pe_constraint = {"method": "none"}
+
+            return phases, hfo_phase, "Hfo", pe_constraint
+        else:
+            # Standard behavior for other cases
+            phases, hfo_phase, pe_constraint = get_phases_for_redox_mode(
+                redox_mode, database, sulfide_mg_l, fix_pe=fix_pe
+            )
+            return phases, hfo_phase, "Hfo", pe_constraint

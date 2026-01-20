@@ -9,21 +9,22 @@ with USGS PHREEQC databases (minteq.dat, phreeqc.dat, etc.).
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from utils.database_management import database_manager
-from utils.helpers import build_solution_block
 from utils.exceptions import (
-    InputValidationError,
     DosingConvergenceError,
+    InputValidationError,
     PhreeqcSimulationError,
 )
+from utils.helpers import build_solution_block
+
+from .phreeqc_wrapper import find_reactant_dose_for_target
 from .schemas import (
     CalculateDosingRequirementInput,
     CalculateDosingRequirementOutput,
     SolutionOutput,
 )
-from .phreeqc_wrapper import find_reactant_dose_for_target
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +65,7 @@ async def calculate_dosing_requirement(input_data: Dict[str, Any]) -> Dict[str, 
         raise InputValidationError(f"Input validation error: {e}")
 
     # Resolve database
-    database_path = database_manager.resolve_and_validate_database(
-        input_model.database, category="general"
-    )
+    database_path = database_manager.resolve_and_validate_database(input_model.database, category="general")
 
     # Extract parameters
     target_parameter = input_model.target_condition.parameter
@@ -75,26 +74,21 @@ async def calculate_dosing_requirement(input_data: Dict[str, Any]) -> Dict[str, 
     max_iterations = input_model.max_iterations or 30
     tolerance = input_model.tolerance or 0.05
     initial_guess = input_model.initial_guess_mmol or 1.0
-    allow_precipitation = (
-        input_model.allow_precipitation
-        if input_model.allow_precipitation is not None
-        else True
-    )
+    allow_precipitation = input_model.allow_precipitation if input_model.allow_precipitation is not None else True
 
     # Get equilibrium minerals from database
     equilibrium_minerals = None
     if allow_precipitation:
         if input_model.equilibrium_minerals:
             # User specified minerals - validate against database
-            mineral_mapping = database_manager.get_compatible_minerals(
-                database_path, input_model.equilibrium_minerals
-            )
+            mineral_mapping = database_manager.get_compatible_minerals(database_path, input_model.equilibrium_minerals)
             equilibrium_minerals = [m for m in mineral_mapping.values() if m]
         else:
             # Use UNIVERSAL_MINERALS - these exist in all PHREEQC databases
             # Add database-specific Mg hydroxide name
-            from utils.constants import UNIVERSAL_MINERALS, MG_HYDROXIDE_NAMES
             import os
+
+            from utils.constants import MG_HYDROXIDE_NAMES, UNIVERSAL_MINERALS
 
             equilibrium_minerals = list(UNIVERSAL_MINERALS)
 
@@ -111,9 +105,7 @@ async def calculate_dosing_requirement(input_data: Dict[str, Any]) -> Dict[str, 
     solution_str = build_solution_block(solution_dict, solution_num=1)
 
     logger.debug(f"Initial solution block:\n{solution_str}")
-    logger.info(
-        f"Searching for {reagent_formula} dose to reach {target_parameter}={target_value}"
-    )
+    logger.info(f"Searching for {reagent_formula} dose to reach {target_parameter}={target_value}")
 
     # Determine mineral name for SI targeting
     mineral_name = None
@@ -197,9 +189,7 @@ async def calculate_dosing_requirement(input_data: Dict[str, Any]) -> Dict[str, 
             tolerance=tolerance,
         )
 
-    logger.info(
-        f"Converged at iteration {iterations}: dose = {optimal_dose:.6f} mmol/L"
-    )
+    logger.info(f"Converged at iteration {iterations}: dose = {optimal_dose:.6f} mmol/L")
 
     # Build output from final results
     final_state = _build_solution_output_from_results(final_results)
@@ -229,9 +219,7 @@ def _build_solution_output_from_results(results: Dict[str, Any]) -> SolutionOutp
     mapped_summary = {
         "pH": solution_summary.get("pH", solution_summary.get("ph")),
         "pe": solution_summary.get("pe"),
-        "temperature_celsius": solution_summary.get(
-            "temperature_celsius", solution_summary.get("temperature", 25.0)
-        ),
+        "temperature_celsius": solution_summary.get("temperature_celsius", solution_summary.get("temperature", 25.0)),
     }
 
     # Add ionic strength if available
@@ -242,9 +230,7 @@ def _build_solution_output_from_results(results: Dict[str, Any]) -> SolutionOutp
 
     # Add specific conductance if available
     if "specific_conductance_uS_cm" in solution_summary:
-        mapped_summary["specific_conductance_uS_cm"] = solution_summary[
-            "specific_conductance_uS_cm"
-        ]
+        mapped_summary["specific_conductance_uS_cm"] = solution_summary["specific_conductance_uS_cm"]
     elif "sc" in solution_summary:
         mapped_summary["specific_conductance_uS_cm"] = solution_summary["sc"]
 

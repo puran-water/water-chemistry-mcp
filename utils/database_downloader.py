@@ -4,24 +4,25 @@ Database Downloader Module
 This module provides functionality to download, verify, and manage PHREEQC databases.
 """
 
-import os
-import logging
-import requests
+import concurrent.futures
 import hashlib
 import json
-import time
+import logging
+import os
 import shutil
 import tempfile
-import concurrent.futures
 import threading
-from typing import Dict, Optional, Tuple, List, Any, Union, Callable
-from urllib.parse import urlparse
+import time
 from datetime import datetime, timedelta
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from urllib.parse import urlparse
+
+import requests
 
 from .database_registry import (
+    DATABASE_FEATURES,
     OFFICIAL_DATABASES,
     get_database_url,
-    DATABASE_FEATURES,
     register_custom_database_metadata,
 )
 

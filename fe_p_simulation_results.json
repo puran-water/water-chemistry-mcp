@@ -1,0 +1,132 @@
+{
+  "orp_curve": [
+    {
+      "orp_mv": -300,
+      "pe": -5.07,
+      "fe_p_ratio": 1.63,
+      "fe_dose_mg_l": 23.6,
+      "achieved_p_mg_l": 2.05
+    },
+    {
+      "orp_mv": -200,
+      "pe": -3.38,
+      "fe_p_ratio": 1.63,
+      "fe_dose_mg_l": 23.6,
+      "achieved_p_mg_l": 2.05
+    },
+    {
+      "orp_mv": -100,
+      "pe": -1.69,
+      "fe_p_ratio": 1.63,
+      "fe_dose_mg_l": 23.6,
+      "achieved_p_mg_l": 2.05
+    },
+    {
+      "orp_mv": 0,
+      "pe": 0.0,
+      "fe_p_ratio": 1.63,
+      "fe_dose_mg_l": 23.6,
+      "achieved_p_mg_l": 2.05
+    },
+    {
+      "orp_mv": 100,
+      "pe": 1.69,
+      "fe_p_ratio": 1.63,
+      "fe_dose_mg_l": 23.6,
+      "achieved_p_mg_l": 2.05
+    },
+    {
+      "orp_mv": 200,
+      "pe": 3.38,
+      "fe_p_ratio": 3.27,
+      "fe_dose_mg_l": 47.2,
+      "achieved_p_mg_l": 1.97
+    },
+    {
+      "orp_mv": 300,
+      "pe": 5.07,
+      "fe_p_ratio": 3.06,
+      "fe_dose_mg_l": 44.1,
+      "achieved_p_mg_l": 2.0
+    },
+    {
+      "orp_mv": 400,
+      "pe": 6.76,
+      "fe_p_ratio": 3.06,
+      "fe_dose_mg_l": 44.1,
+      "achieved_p_mg_l": 1.99
+    }
+  ],
+  "target_p_curve": [
+    {
+      "target_p_mg_l": 8.0,
+      "achieved_p_mg_l": 8.01,
+      "fe_p_ratio": 5.96,
+      "fe_dose_mg_l": 21.5,
+      "removal_pct": 19.9
+    },
+    {
+      "target_p_mg_l": 6.0,
+      "achieved_p_mg_l": 5.975,
+      "fe_p_ratio": 3.74,
+      "fe_dose_mg_l": 27.0,
+      "removal_pct": 40.2
+    },
+    {
+      "target_p_mg_l": 4.0,
+      "achieved_p_mg_l": 3.997,
+      "fe_p_ratio": 3.14,
+      "fe_dose_mg_l": 34.0,
+      "removal_pct": 60.0
+    },
+    {
+      "target_p_mg_l": 3.0,
+      "achieved_p_mg_l": 2.968,
+      "fe_p_ratio": 3.06,
+      "fe_dose_mg_l": 38.6,
+      "removal_pct": 70.3
+    },
+    {
+      "target_p_mg_l": 2.0,
+      "achieved_p_mg_l": 1.993,
+      "fe_p_ratio": 3.06,
+      "fe_dose_mg_l": 44.1,
+      "removal_pct": 80.1
+    },
+    {
+      "target_p_mg_l": 1.5,
+      "achieved_p_mg_l": 1.476,
+      "fe_p_ratio": 3.11,
+      "fe_dose_mg_l": 47.7,
+      "removal_pct": 85.2
+    },
+    {
+      "target_p_mg_l": 1.0,
+      "achieved_p_mg_l": 1.019,
+      "fe_p_ratio": 3.16,
+      "fe_dose_mg_l": 51.4,
+      "removal_pct": 89.8
+    },
+    {
+      "target_p_mg_l": 0.5,
+      "achieved_p_mg_l": 0.529,
+      "fe_p_ratio": 3.27,
+      "fe_dose_mg_l": 56.0,
+      "removal_pct": 94.7
+    },
+    {
+      "target_p_mg_l": 0.3,
+      "achieved_p_mg_l": 0.261,
+      "fe_p_ratio": 3.37,
+      "fe_dose_mg_l": 59.0,
+      "removal_pct": 97.4
+    },
+    {
+      "target_p_mg_l": 0.1,
+      "achieved_p_mg_l": 0.065,
+      "fe_p_ratio": 3.48,
+      "fe_dose_mg_l": 62.1,
+      "removal_pct": 99.3
+    }
+  ]
+}

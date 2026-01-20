@@ -8,19 +8,20 @@ Supports querying minerals, species, elements, and keyword blocks.
 import logging
 import os
 import re
-from typing import Dict, Any, List, Optional, Union
 from difflib import SequenceMatcher
+from typing import Any, Dict, List, Optional, Union
 
 from utils.database_management import database_manager
-from utils.import_helpers import PHREEQPYTHON_AVAILABLE, DEFAULT_DATABASE
 from utils.exceptions import (
-    InputValidationError,
-    DatabaseNotFoundError,
-    DatabaseLoadError,
-    TermNotFoundError,
     AmbiguousQueryError,
+    DatabaseLoadError,
+    DatabaseNotFoundError,
     DatabaseQueryError,
+    InputValidationError,
+    TermNotFoundError,
 )
+from utils.import_helpers import DEFAULT_DATABASE, PHREEQPYTHON_AVAILABLE
+
 from .schemas import QueryThermoDatabaseInput, QueryThermoDatabaseOutput
 
 logger = logging.getLogger(__name__)
@@ -360,14 +361,10 @@ async def query_thermodynamic_database(input_data: Dict[str, Any]) -> Dict[str, 
     # Validate query_type
     valid_types = ["species", "mineral", "element_info", "keyword_block"]
     if query_type not in valid_types:
-        raise InputValidationError(
-            f"Invalid query_type: '{query_type}'. Valid types: {', '.join(valid_types)}"
-        )
+        raise InputValidationError(f"Invalid query_type: '{query_type}'. Valid types: {', '.join(valid_types)}")
 
     # Resolve database
-    database_path = database_manager.resolve_and_validate_database(
-        input_model.database, category="general"
-    )
+    database_path = database_manager.resolve_and_validate_database(input_model.database, category="general")
 
     # Parse database
     try:

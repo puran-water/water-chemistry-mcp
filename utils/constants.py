@@ -442,7 +442,7 @@ def get_database_minerals(database_name):
         Set of mineral names
     """
     try:
-        from .mineral_registry import DATABASE_SPECIFIC_MINERALS, COMMON_MINERALS
+        from .mineral_registry import COMMON_MINERALS, DATABASE_SPECIFIC_MINERALS
 
         minerals = set(COMMON_MINERALS.keys())
         if database_name in DATABASE_SPECIFIC_MINERALS:

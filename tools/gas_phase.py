@@ -7,23 +7,24 @@ Uses phreeqpython native API for gas phase equilibration.
 
 import logging
 import os
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from utils.database_management import database_manager
-from utils.import_helpers import PHREEQPYTHON_AVAILABLE
 from utils.exceptions import (
-    InputValidationError,
-    PhreeqcSimulationError,
     DatabaseLoadError,
     GasPhaseError,
+    InputValidationError,
+    PhreeqcSimulationError,
 )
-from utils.helpers import build_solution_block, build_gas_phase_block, build_selected_output_block
+from utils.helpers import build_gas_phase_block, build_selected_output_block, build_solution_block
+from utils.import_helpers import PHREEQPYTHON_AVAILABLE
+
+from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
 from .schemas import (
     SimulateGasPhaseInteractionInput,
     SimulateGasPhaseInteractionOutput,
     SolutionOutput,
 )
-from .phreeqc_wrapper import run_phreeqc_simulation, PhreeqcError
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +57,7 @@ async def simulate_gas_phase_interaction(input_data: Dict[str, Any]) -> Dict[str
     logger.info("Running simulate_gas_phase_interaction tool...")
 
     if not PHREEQPYTHON_AVAILABLE:
-        raise PhreeqcSimulationError(
-            "PhreeqPython is not available. Install with: pip install phreeqpython"
-        )
+        raise PhreeqcSimulationError("PhreeqPython is not available. Install with: pip install phreeqpython")
 
     # Validate input
     try:
@@ -67,9 +66,7 @@ async def simulate_gas_phase_interaction(input_data: Dict[str, Any]) -> Dict[str
         raise InputValidationError(f"Input validation error: {e}")
 
     # Resolve database
-    database_path = database_manager.resolve_and_validate_database(
-        input_model.database, category="general"
-    )
+    database_path = database_manager.resolve_and_validate_database(input_model.database, category="general")
 
     # Extract gas phase definition
     gas_def = input_model.gas_phase.model_dump(exclude_defaults=True)
@@ -121,9 +118,10 @@ async def _simulate_gas_phase_phreeqpython(
     - pp.add_gas() to create gas phases
     - solution.interact(gas) to equilibrate
     """
-    from phreeqpython import PhreeqPython
-    from pathlib import Path
     import os
+    from pathlib import Path
+
+    from phreeqpython import PhreeqPython
 
     # Create PhreeqPython instance and load database
     # PhreeqPython requires database and database_directory parameters for custom paths

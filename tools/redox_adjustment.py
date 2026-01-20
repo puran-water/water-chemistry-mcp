@@ -7,23 +7,24 @@ Supports pe, Eh, and redox couple equilibration.
 
 import logging
 import os
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from utils.database_management import database_manager
-from utils.import_helpers import PHREEQPYTHON_AVAILABLE
 from utils.exceptions import (
+    DatabaseLoadError,
     InputValidationError,
     PhreeqcSimulationError,
-    DatabaseLoadError,
     RedoxSpecificationError,
 )
-from utils.helpers import build_solution_block, build_selected_output_block
+from utils.helpers import build_selected_output_block, build_solution_block
+from utils.import_helpers import PHREEQPYTHON_AVAILABLE
+
+from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
 from .schemas import (
     SimulateRedoxAdjustmentInput,
     SimulateRedoxAdjustmentOutput,
     SolutionOutput,
 )
-from .phreeqc_wrapper import run_phreeqc_simulation, PhreeqcError
 
 logger = logging.getLogger(__name__)
 
@@ -120,9 +121,7 @@ async def simulate_redox_adjustment(input_data: Dict[str, Any]) -> Dict[str, Any
     logger.info("Running simulate_redox_adjustment tool...")
 
     if not PHREEQPYTHON_AVAILABLE:
-        raise PhreeqcSimulationError(
-            "PhreeqPython is not available. Install with: pip install phreeqpython"
-        )
+        raise PhreeqcSimulationError("PhreeqPython is not available. Install with: pip install phreeqpython")
 
     # Validate input
     try:
@@ -131,9 +130,7 @@ async def simulate_redox_adjustment(input_data: Dict[str, Any]) -> Dict[str, Any
         raise InputValidationError(f"Input validation error: {e}")
 
     # Resolve database
-    database_path = database_manager.resolve_and_validate_database(
-        input_model.database, category="general"
-    )
+    database_path = database_manager.resolve_and_validate_database(input_model.database, category="general")
 
     # Extract redox target
     target_redox = input_model.target_redox
@@ -142,8 +139,7 @@ async def simulate_redox_adjustment(input_data: Dict[str, Any]) -> Dict[str, Any
     # Validate redox specification
     if parameter not in ["pe", "eh_mv", "equilibrate_with_couple"]:
         raise RedoxSpecificationError(
-            f"Invalid redox parameter: '{parameter}'. "
-            f"Valid options: 'pe', 'Eh_mV', 'equilibrate_with_couple'",
+            f"Invalid redox parameter: '{parameter}'. " f"Valid options: 'pe', 'Eh_mV', 'equilibrate_with_couple'",
             parameter=parameter,
         )
 
@@ -204,9 +200,10 @@ async def _simulate_redox_pe(
     Since phreeqpython's solution.pe is read-only, we need to create
     a new solution with the target pe.
     """
-    from phreeqpython import PhreeqPython
-    from pathlib import Path
     import os
+    from pathlib import Path
+
+    from phreeqpython import PhreeqPython
 
     # Create PhreeqPython instance and load database
     # PhreeqPython requires database and database_directory parameters for custom paths

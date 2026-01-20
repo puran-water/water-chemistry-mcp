@@ -699,6 +699,136 @@ class TestChemicalScenarios:
 
 
 # =============================================================================
+# SULFIDE COMPETITION TESTS
+# =============================================================================
+
+class TestSulfideCompetition:
+    """Tests for sulfide competition in anaerobic Fe-P precipitation."""
+
+    def test_fes_competition_increases_fe_requirement(self, typical_wwtp_solution):
+        """Sulfide presence increases Fe requirement in anaerobic mode."""
+        # Solution without sulfide
+        no_sulfide_solution = {
+            "ph": 7.0,
+            "temperature_celsius": 30.0,
+            "analysis": {
+                "P": 50.0,
+                "Ca": 80,
+                "Mg": 30,
+                "Na": 200,
+                "Cl": 100,
+                "Alkalinity": "as CaCO3 500",
+            },
+            "units": "mg/L",
+        }
+
+        # Solution with sulfide
+        with_sulfide_solution = {
+            "ph": 7.0,
+            "temperature_celsius": 30.0,
+            "analysis": {
+                "P": 50.0,
+                "Ca": 80,
+                "Mg": 30,
+                "Na": 200,
+                "Cl": 100,
+                "S(-2)": 30.0,  # Sulfide present
+                "Alkalinity": "as CaCO3 500",
+            },
+            "units": "mg/L",
+        }
+
+        result_no_sulfide = run_async(calculate_ferric_dose_for_tp({
+            "initial_solution": no_sulfide_solution,
+            "target_residual_p_mg_l": 20.0,
+            "iron_source": "FeSO4",
+            "redox": {"mode": "anaerobic"},
+            "database": "minteq.v4.dat",
+            "binary_search": {"max_iterations": 20}
+        }))
+
+        result_with_sulfide = run_async(calculate_ferric_dose_for_tp({
+            "initial_solution": with_sulfide_solution,
+            "target_residual_p_mg_l": 20.0,
+            "iron_source": "FeSO4",
+            "redox": {"mode": "anaerobic"},
+            "database": "minteq.v4.dat",
+            "binary_search": {"max_iterations": 20}
+        }))
+
+        # Both should succeed
+        assert result_no_sulfide.get("status") == "success", \
+            f"No sulfide should work: {result_no_sulfide.get('error')}"
+        assert result_with_sulfide.get("status") == "success", \
+            f"With sulfide should work: {result_with_sulfide.get('error')}"
+
+        # With sulfide, more Fe is needed due to FeS competition
+        opt_no = result_no_sulfide.get("optimization_summary", {})
+        opt_with = result_with_sulfide.get("optimization_summary", {})
+
+        fe_no = opt_no.get("optimal_fe_dose_mg_l", 0)
+        fe_with = opt_with.get("optimal_fe_dose_mg_l", 0)
+
+        # Fe with sulfide should be at least 20% higher due to FeS competition
+        assert fe_with > fe_no * 1.2, \
+            f"With sulfide, Fe dose ({fe_with:.1f}) should be > 1.2x no sulfide ({fe_no:.1f})"
+
+    def test_sulfide_warning_in_notes(self, high_sulfide_solution):
+        """Test that sulfide competition warning appears in notes."""
+        result = run_async(calculate_ferric_dose_for_tp({
+            "initial_solution": high_sulfide_solution,
+            "target_residual_p_mg_l": 20.0,
+            "iron_source": "FeSO4",
+            "redox": {"mode": "anaerobic"},
+            "database": "minteq.v4.dat",
+            "binary_search": {"max_iterations": 20}
+        }))
+
+        assert result.get("status") == "success", f"Should work: {result.get('error')}"
+
+        # Check for sulfide warning in notes or warnings
+        notes = result.get("optimization_summary", {}).get("notes", []) or []
+        warnings = result.get("warnings", []) or []
+        all_messages = notes + warnings
+
+        has_sulfide_warning = any(
+            "sulfide" in msg.lower() or "fes" in msg.lower()
+            for msg in all_messages
+        )
+        assert has_sulfide_warning, \
+            f"Should have sulfide competition warning. Messages: {all_messages}"
+
+    def test_thermodynamic_warning_fe3_at_low_pe(self, typical_wwtp_solution):
+        """Test warning when using Fe(III) phases at reducing conditions."""
+        # Use fixed_pe at reducing conditions with FeCl3 (ferric)
+        result = run_async(calculate_ferric_dose_for_tp({
+            "initial_solution": typical_wwtp_solution,
+            "target_residual_p_mg_l": 1.0,
+            "iron_source": "FeCl3",  # Ferric coagulant
+            "redox": {"mode": "fixed_pe", "pe_value": -5.0},  # Very reducing
+            "database": "minteq.v4.dat",
+            "binary_search": {"max_iterations": 15}
+        }))
+
+        # Should complete (may or may not succeed due to thermodynamic instability)
+        # The important thing is that warnings are generated
+        notes = result.get("optimization_summary", {}).get("notes", []) or []
+        warnings = result.get("warnings", []) or []
+        all_messages = notes + warnings
+
+        # Should have warning about Fe(III) at reducing conditions
+        has_fe3_warning = any(
+            "fe(iii)" in msg.lower() or "thermodynamic" in msg.lower()
+            for msg in all_messages
+        )
+
+        # This test verifies the warning system works, not that the simulation fails
+        # (the simulation may still work with force_equality)
+        assert has_fe3_warning or result.get("status") != "success", \
+            f"Should have thermodynamic warning or fail. Status: {result.get('status')}, Messages: {all_messages}"
+
+
+# =============================================================================
 # ELEMENT TOTALS TESTS
 # =============================================================================
 

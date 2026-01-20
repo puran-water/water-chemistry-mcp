@@ -3,8 +3,9 @@ Common schemas for water chemistry calculations.
 """
 
 import re
-from typing import Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field, validator, root_validator
+from typing import Any, Dict, List, Optional, Union
+
+from pydantic import BaseModel, Field, root_validator, validator
 
 # --- Common Base Models ---
 
@@ -1108,9 +1109,7 @@ class OptimalDose(BaseModel):
 class GenerateLimeSofteningCurveOutput(BaseModel):
     """Output from lime softening curve generation."""
 
-    curve_data: List[LimeSofteningCurvePoint] = Field(
-        ..., description="Complete dose-response curve data."
-    )
+    curve_data: List[LimeSofteningCurvePoint] = Field(..., description="Complete dose-response curve data.")
     optimal_dose: Optional[OptimalDose] = Field(
         None, description="Interpolated optimal dose for target hardness (85 mg/L as CaCO3)."
     )
@@ -1137,9 +1136,7 @@ class LimeSofteningOptimizationSummary(BaseModel):
     optimal_dose_mmol: float = Field(..., description="Optimal lime dose in mmol/L.")
     target_hardness_mg_caco3: float = Field(..., description="Target hardness.")
     achieved_hardness_mg_caco3: float = Field(..., description="Achieved hardness.")
-    hardness_removal_efficiency: Optional[float] = Field(
-        None, description="Removal efficiency as percentage."
-    )
+    hardness_removal_efficiency: Optional[float] = Field(None, description="Removal efficiency as percentage.")
 
 
 class CalculateLimeSofteningDoseOutput(SolutionOutput):
@@ -1178,22 +1175,14 @@ class PhosphorusOptimizationSummary(BaseModel):
     """Summary of phosphorus removal optimization results."""
 
     optimal_coagulant_dose_mmol: float = Field(..., description="Optimal coagulant dose in mmol/L.")
-    optimal_naoh_dose_mmol: Optional[float] = Field(
-        None, description="Optimal NaOH dose if pH control enabled."
-    )
+    optimal_naoh_dose_mmol: Optional[float] = Field(None, description="Optimal NaOH dose if pH control enabled.")
     target_p_mg_l: float = Field(..., description="Target P concentration.")
     achieved_p_mg_l: float = Field(..., description="Achieved P concentration.")
     target_ph: Optional[float] = Field(None, description="Target pH if specified.")
     achieved_ph: Optional[float] = Field(None, description="Achieved pH.")
-    p_removal_efficiency: Optional[float] = Field(
-        None, description="P removal efficiency as percentage."
-    )
-    initial_p_mg_l_from_sim: Optional[float] = Field(
-        None, description="Initial P from PHREEQC simulation."
-    )
-    initial_p_mg_l_from_input: Optional[float] = Field(
-        None, description="Initial P inferred from input."
-    )
+    p_removal_efficiency: Optional[float] = Field(None, description="P removal efficiency as percentage.")
+    initial_p_mg_l_from_sim: Optional[float] = Field(None, description="Initial P from PHREEQC simulation.")
+    initial_p_mg_l_from_input: Optional[float] = Field(None, description="Initial P inferred from input.")
     optimization_path: Optional[List[Dict[str, Any]]] = Field(
         None, description="Optimization iteration history for debugging."
     )
@@ -1217,9 +1206,7 @@ class OptimizationObjective(BaseModel):
         description="Parameter to optimize (e.g., 'pH', 'total_hardness', 'residual_phosphorus', 'SI').",
     )
     value: float = Field(..., description="Target value for the parameter.")
-    weight: Optional[float] = Field(
-        1.0, description="Relative weight for multi-objective optimization (0-1)."
-    )
+    weight: Optional[float] = Field(1.0, description="Relative weight for multi-objective optimization (0-1).")
     units: Optional[str] = Field(None, description="Units for the target value (e.g., 'mg/L', 'mg/L as CaCO3').")
     constraint_type: Optional[str] = Field(
         "target",
@@ -1250,18 +1237,14 @@ class CalculateDosingRequirementEnhancedInput(BaseModel):
     tolerance: Optional[float] = Field(0.01, description="Convergence tolerance.")
     database: Optional[str] = Field(None, description="PHREEQC database file to use.")
     allow_precipitation: Optional[bool] = Field(True, description="Allow mineral precipitation.")
-    equilibrium_minerals: Optional[List[str]] = Field(
-        None, description="List of minerals to allow for equilibrium."
-    )
+    equilibrium_minerals: Optional[List[str]] = Field(None, description="List of minerals to allow for equilibrium.")
 
 
 class EnhancedDosingOptimizationSummary(BaseModel):
     """Summary of enhanced dosing optimization results."""
 
     optimal_doses: Dict[str, float] = Field(..., description="Optimal dose for each reagent in mmol/L.")
-    objective_results: Dict[str, Dict[str, Any]] = Field(
-        ..., description="Achieved values for each objective."
-    )
+    objective_results: Dict[str, Dict[str, Any]] = Field(..., description="Achieved values for each objective.")
     convergence_status: str = Field(..., description="Optimization convergence status.")
     iterations_taken: int = Field(..., description="Number of iterations performed.")
     optimization_method: str = Field(..., description="Method used for optimization.")
@@ -1287,9 +1270,7 @@ class OptimizeMultiReagentTreatmentInput(BaseModel):
         "weighted_sum",
         description="Strategy: 'weighted_sum', 'pareto_front', 'sequential', 'robust'.",
     )
-    grid_points: Optional[int] = Field(
-        10, description="Number of grid points per reagent dimension for search."
-    )
+    grid_points: Optional[int] = Field(10, description="Number of grid points per reagent dimension for search.")
     database: Optional[str] = Field("minteq.dat", description="PHREEQC database file to use.")
     allow_precipitation: Optional[bool] = Field(True, description="Allow mineral precipitation.")
 
@@ -1321,9 +1302,7 @@ class OptimizeMultiReagentTreatmentOutput(BaseModel):
     optimal_doses: Optional[Dict[str, float]] = Field(
         None, description="Optimal doses (weighted_sum, sequential, robust strategies)."
     )
-    weighted_score: Optional[float] = Field(
-        None, description="Weighted objective score (weighted_sum strategy)."
-    )
+    weighted_score: Optional[float] = Field(None, description="Weighted objective score (weighted_sum strategy).")
 
     # For pareto_front strategy
     pareto_front: Optional[List[ParetoSolution]] = Field(
@@ -1345,7 +1324,5 @@ class OptimizeMultiReagentTreatmentOutput(BaseModel):
     objective_results: Optional[Dict[str, Dict[str, Any]]] = Field(
         None, description="Achieved values for each objective."
     )
-    optimization_path: Optional[List[Dict[str, Any]]] = Field(
-        None, description="Optimization iteration history."
-    )
+    optimization_path: Optional[List[Dict[str, Any]]] = Field(None, description="Optimization iteration history.")
     error: Optional[str] = Field(None, description="Error message if optimization failed.")

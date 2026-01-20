@@ -6,8 +6,8 @@ including their formulas, alternative names, and compatibility information.
 The registry helps ensure mineral compatibility when using different thermodynamic databases.
 """
 
-import os
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 

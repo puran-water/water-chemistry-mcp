@@ -10,24 +10,25 @@ for advanced configurations, as phreeqpython has limited native support.
 
 import logging
 import os
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from utils.database_management import database_manager
-from utils.import_helpers import PHREEQPYTHON_AVAILABLE
 from utils.exceptions import (
+    DatabaseLoadError,
+    FeatureNotSupportedError,
     InputValidationError,
     PhreeqcSimulationError,
-    DatabaseLoadError,
     SurfaceDefinitionError,
-    FeatureNotSupportedError,
 )
-from utils.helpers import build_solution_block, build_surface_block, build_selected_output_block
+from utils.helpers import build_selected_output_block, build_solution_block, build_surface_block
+from utils.import_helpers import PHREEQPYTHON_AVAILABLE
+
+from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
 from .schemas import (
     SimulateSurfaceInteractionInput,
     SimulateSurfaceInteractionOutput,
     SolutionOutput,
 )
-from .phreeqc_wrapper import run_phreeqc_simulation, PhreeqcError
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +66,7 @@ async def simulate_surface_interaction(input_data: Dict[str, Any]) -> Dict[str, 
     logger.info("Running simulate_surface_interaction tool...")
 
     if not PHREEQPYTHON_AVAILABLE:
-        raise PhreeqcSimulationError(
-            "PhreeqPython is not available. Install with: pip install phreeqpython"
-        )
+        raise PhreeqcSimulationError("PhreeqPython is not available. Install with: pip install phreeqpython")
 
     # Validate input
     try:
@@ -76,9 +75,7 @@ async def simulate_surface_interaction(input_data: Dict[str, Any]) -> Dict[str, 
         raise InputValidationError(f"Input validation error: {e}")
 
     # Resolve database - surface complexation needs a database with surface species
-    database_path = database_manager.resolve_and_validate_database(
-        input_model.database, category="surface"
-    )
+    database_path = database_manager.resolve_and_validate_database(input_model.database, category="surface")
 
     # Extract surface definition
     surface_def = input_model.surface_definition.model_dump(exclude_defaults=True)
@@ -169,12 +166,14 @@ def _extract_surface_info(surface_def: Dict[str, Any]) -> Dict[str, Any]:
         sites = []
         for site in surface_def["sites_info"]:
             if isinstance(site, dict):
-                sites.append({
-                    "name": site.get("name"),
-                    "moles": site.get("moles", site.get("site_density")),
-                    "specific_area_m2_g": site.get("specific_area_m2_g", site.get("specific_area")),
-                    "mass_g": site.get("mass_g", site.get("mass")),
-                })
+                sites.append(
+                    {
+                        "name": site.get("name"),
+                        "moles": site.get("moles", site.get("site_density")),
+                        "specific_area_m2_g": site.get("specific_area_m2_g", site.get("specific_area")),
+                        "mass_g": site.get("mass_g", site.get("mass")),
+                    }
+                )
         info["sites"] = sites
 
     elif surface_def.get("sites"):

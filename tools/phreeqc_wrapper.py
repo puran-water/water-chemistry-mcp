@@ -8,19 +8,20 @@ Supports two execution modes:
 The subprocess mode is preferred when using USGS databases for full functionality.
 """
 
-import logging
-import re
-import os
 import asyncio
+import itertools
+import logging
+import math
+import os
+import re
+import shutil
 import subprocess
 import tempfile
-import itertools
-import shutil
 import uuid
-import numpy as np
-import math
-from typing import Optional, Dict, Any, List, Tuple, Union
 from functools import lru_cache
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -234,9 +235,7 @@ async def run_phreeqc_subprocess(
                         # Extract error messages
                         error_lines = [l for l in output_content.split("\n") if "ERROR" in l]
                         error_msg = "\n".join(error_lines[:10])  # First 10 errors
-                raise PhreeqcError(
-                    f"PHREEQC subprocess failed (exit code {process.returncode}): {error_msg}"
-                )
+                raise PhreeqcError(f"PHREEQC subprocess failed (exit code {process.returncode}): {error_msg}")
 
             # Parse results from output file and selected output
             results = _parse_phreeqc_output_files(output_file, selected_output_file)
@@ -282,7 +281,12 @@ def _inject_selected_output_file(input_string: str, output_file: str) -> str:
             in_selected_output = True
             # Add -file directive immediately after
             result_lines.append(f"    -file {output_file}")
-        elif in_selected_output and line.strip() and not line.strip().startswith("-") and not line.strip().startswith("#"):
+        elif (
+            in_selected_output
+            and line.strip()
+            and not line.strip().startswith("-")
+            and not line.strip().startswith("#")
+        ):
             # End of SELECTED_OUTPUT block (new keyword found)
             in_selected_output = False
 
@@ -393,8 +397,9 @@ def _normalize_element_name(element_name: str) -> str:
         Ca -> Ca
     """
     import re
+
     # Match element symbol followed by optional valence in parentheses
-    match = re.match(r'^([A-Z][a-z]?)(\([+-]?\d+\))?$', element_name.strip())
+    match = re.match(r"^([A-Z][a-z]?)(\([+-]?\d+\))?$", element_name.strip())
     if match:
         return match.group(1)  # Return just the base element
     return element_name  # Return unchanged if pattern doesn't match
@@ -407,8 +412,9 @@ def _is_element_total_column(header: str) -> bool:
     Matches: P, Fe, Ca, Mg, P(5), Fe(2), S(-2), etc.
     """
     import re
+
     # Pattern: 1-2 letter element symbol with optional valence
-    pattern = r'^[A-Z][a-z]?(\([+-]?\d+\))?$'
+    pattern = r"^[A-Z][a-z]?(\([+-]?\d+\))?$"
     return bool(re.match(pattern, header.strip()))
 
 
@@ -427,7 +433,7 @@ def _parse_selected_output(selected_output_file: str) -> Dict[str, Any]:
         "element_totals_molality": {},
         "species_molalities": {},
         "equilibrium_phase_moles": {},  # From USER_PUNCH equi_* headers
-        "surface_adsorbed_moles": {},   # From USER_PUNCH surf_* headers
+        "surface_adsorbed_moles": {},  # From USER_PUNCH surf_* headers
     }
 
     try:
@@ -533,18 +539,18 @@ USE_SUBPROCESS = os.environ.get("USE_PHREEQC_SUBPROCESS", "1").lower() in ("1", 
 
 # Import helper functions
 from utils.helpers import (
-    build_solution_block,
-    build_reaction_block,
     build_equilibrium_phases_block,
-    build_mix_block,
     build_gas_phase_block,
-    build_surface_block,
     build_kinetics_block,
-    build_selected_output_block,
+    build_mix_block,
     build_phase_linked_surface_block,
+    build_reaction_block,
+    build_selected_output_block,
+    build_solution_block,
+    build_surface_block,
     build_user_punch_for_partitioning,
 )
-from utils.import_helpers import PHREEQPYTHON_AVAILABLE, DEFAULT_DATABASE, get_default_database
+from utils.import_helpers import DEFAULT_DATABASE, PHREEQPYTHON_AVAILABLE, get_default_database
 
 
 def get_mineral_alternatives(mineral_name, database_path=None):
@@ -570,7 +576,7 @@ def get_mineral_alternatives(mineral_name, database_path=None):
 
         # Get formula of the requested mineral
         try:
-            from utils.mineral_registry import get_mineral_formula, get_alternative_mineral_names
+            from utils.mineral_registry import get_alternative_mineral_names, get_mineral_formula
 
             formula = get_mineral_formula(mineral_name, db_name)
 
@@ -585,7 +591,7 @@ def get_mineral_alternatives(mineral_name, database_path=None):
             valid_alternatives = {}
 
             if database_path:
-                from utils.constants import mineral_exists_in_database, database_validator_available
+                from utils.constants import database_validator_available, mineral_exists_in_database
 
                 if database_validator_available():
                     # Validate each alternative
@@ -1461,6 +1467,7 @@ async def run_phreeqc_with_phreeqpython(
         raise PhreeqcError("PhreeqPython library is not available")
 
     from phreeqpython import PhreeqPython
+
     from utils.import_helpers import DEFAULT_DATABASE
 
     db_to_use = database_path or DEFAULT_DATABASE
@@ -1571,20 +1578,20 @@ async def run_phreeqc_with_phreeqpython(
                         target_si_list = [0.0] * len(supersaturated_minerals)  # All to SI=0
                         initial_moles_list = [0.0] * len(supersaturated_minerals)  # Start with no solid
 
-                        eq_phase = pp.add_equilibrium_phase(
-                            supersaturated_minerals, target_si_list, initial_moles_list
-                        )
+                        eq_phase = pp.add_equilibrium_phase(supersaturated_minerals, target_si_list, initial_moles_list)
 
                         # Store initial element totals to calculate precipitation
-                        initial_elements = {elem: solution.total_element(elem, "mol")
-                                           for elem in solution.elements.keys()
-                                           if elem not in ["H", "O", "H(0)", "O(0)"]}
+                        initial_elements = {
+                            elem: solution.total_element(elem, "mol")
+                            for elem in solution.elements.keys()
+                            if elem not in ["H", "O", "H(0)", "O(0)"]
+                        }
 
                         # Equilibrate solution with all phases simultaneously
                         solution.interact(eq_phase)
 
                         # Extract precipitated amounts from eq_phase.components
-                        if hasattr(eq_phase, 'components') and eq_phase.components:
+                        if hasattr(eq_phase, "components") and eq_phase.components:
                             for mineral, moles in eq_phase.components.items():
                                 if moles > 1e-10:  # Significant precipitation
                                     precipitated_phases[mineral] = moles
@@ -1601,8 +1608,12 @@ async def run_phreeqc_with_phreeqpython(
                                 if initial_si > 0:
                                     # Get affected element for tracking
                                     affected_elements = {
-                                        "Calcite": "Ca", "Aragonite": "Ca", "Gypsum": "Ca",
-                                        "Brucite": "Mg", "Dolomite": "Ca", "Strengite": "P",
+                                        "Calcite": "Ca",
+                                        "Aragonite": "Ca",
+                                        "Gypsum": "Ca",
+                                        "Brucite": "Mg",
+                                        "Dolomite": "Ca",
+                                        "Strengite": "P",
                                     }
                                     affected_elem = affected_elements.get(mineral)
                                     initial_total = solution.total_element(affected_elem, "mol") if affected_elem else 0
@@ -2704,7 +2715,7 @@ async def find_reactant_dose_for_target(
         # IMPORTANT: If no minerals are specified but precipitation is enabled,
         # use UNIVERSAL_MINERALS which exist in ALL PHREEQC databases
         if not equilibrium_minerals:
-            from utils.constants import UNIVERSAL_MINERALS, MG_HYDROXIDE_NAMES
+            from utils.constants import MG_HYDROXIDE_NAMES, UNIVERSAL_MINERALS
 
             # Start with universal minerals
             equilibrium_minerals = list(UNIVERSAL_MINERALS)
@@ -2723,9 +2734,7 @@ async def find_reactant_dose_for_target(
             # Use the minerals directly - UNIVERSAL_MINERALS are guaranteed to exist
             # Skip the mineral registry mapping which has incorrect data for some databases
             phases_to_consider = [{"name": name} for name in equilibrium_minerals]
-            equilibrium_phases_str = build_equilibrium_phases_block(
-                phases_to_consider, block_num=1, allow_empty=True
-            )
+            equilibrium_phases_str = build_equilibrium_phases_block(phases_to_consider, block_num=1, allow_empty=True)
             if equilibrium_phases_str:
                 logger.info(f"Enabled precipitation with minerals: {', '.join(equilibrium_minerals)}")
 

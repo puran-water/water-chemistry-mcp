@@ -2,21 +2,22 @@
 Tool for simulating the mixing of multiple solutions.
 """
 
+import asyncio
 import logging
 import os
-from typing import Dict, Any, List, Optional
-import asyncio
+from typing import Any, Dict, List, Optional
 
-from utils.database_management import database_manager
-from .schemas import SimulateSolutionMixingInput, SimulateSolutionMixingOutput
-from .phreeqc_wrapper import run_phreeqc_simulation, PhreeqcError
-from utils.helpers import (
-    build_solution_block,
-    build_mix_block,
-    build_equilibrium_phases_block,
-    build_selected_output_block,
-)
 from utils.constants import DEFAULT_MINERALS
+from utils.database_management import database_manager
+from utils.helpers import (
+    build_equilibrium_phases_block,
+    build_mix_block,
+    build_selected_output_block,
+    build_solution_block,
+)
+
+from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
+from .schemas import SimulateSolutionMixingInput, SimulateSolutionMixingOutput
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,7 @@ async def simulate_solution_mixing(input_data: Dict[str, Any]) -> Dict[str, Any]
         return {"error": f"Input validation error: {e}"}
 
     # Centralized database resolution with validation and fallback
-    database_path = database_manager.resolve_and_validate_database(
-        input_model.database, category="general"
-    )
+    database_path = database_manager.resolve_and_validate_database(input_model.database, category="general")
 
     try:
         phreeqc_input = ""

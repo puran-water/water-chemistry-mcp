@@ -7,7 +7,7 @@ import os
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
-from .import_helpers import get_available_database_paths, get_default_database, USGS_PHREEQC_DATABASE_PATH
+from .import_helpers import USGS_PHREEQC_DATABASE_PATH, get_available_database_paths, get_default_database
 
 logger = logging.getLogger(__name__)
 

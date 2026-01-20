@@ -2,10 +2,10 @@
 Tool for simulating chemical additions to a solution.
 """
 
+import asyncio
 import logging
 import os
-from typing import Dict, Any, List, Optional
-import asyncio
+from typing import Any, Dict, List, Optional
 
 from utils.database_management import database_manager
 
@@ -14,19 +14,20 @@ try:
 except ImportError:
     add_mass_balance_to_output = None
 from utils.amorphous_phases import get_amorphous_phases_for_system
-from .schemas import SimulateChemicalAdditionInput, SimulateChemicalAdditionOutput
+from utils.helpers import (
+    build_equilibrium_phases_block,
+    build_reaction_block,
+    build_selected_output_block,
+    build_solution_block,
+)
+
 from .phreeqc_wrapper import (
+    PhreeqcError,
     run_phreeqc_simulation,
     run_phreeqc_simulation_with_precipitation,
     run_phreeqc_with_phreeqpython,
-    PhreeqcError,
 )
-from utils.helpers import (
-    build_solution_block,
-    build_reaction_block,
-    build_equilibrium_phases_block,
-    build_selected_output_block,
-)
+from .schemas import SimulateChemicalAdditionInput, SimulateChemicalAdditionOutput
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +59,7 @@ async def simulate_chemical_addition(input_data: Dict[str, Any]) -> Dict[str, An
         return {"error": f"Input validation error: {e}"}
 
     # Centralized database resolution with validation and fallback
-    database_path = database_manager.resolve_and_validate_database(
-        input_model.database, category="general"
-    )
+    database_path = database_manager.resolve_and_validate_database(input_model.database, category="general")
 
     try:
         # Extract initial solution parameters
@@ -147,6 +146,7 @@ async def simulate_chemical_addition(input_data: Dict[str, Any]) -> Dict[str, An
 
                 # Now run kinetic precipitation calculation
                 from phreeqpython import PhreeqPython
+
                 from .phreeqc_wrapper import calculate_kinetic_precipitation
 
                 # Create PhreeqPython instance

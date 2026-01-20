@@ -2,16 +2,17 @@
 Tool for predicting mineral scaling potential in water.
 """
 
+import asyncio
 import logging
 import os
-from typing import Dict, Any, List, Optional
-import asyncio
+from typing import Any, Dict, List, Optional
 
 from utils.database_management import database_manager
+from utils.helpers import build_equilibrium_phases_block, build_selected_output_block, build_solution_block
 from utils.import_helpers import PHREEQPYTHON_AVAILABLE
+
+from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
 from .schemas import PredictScalingPotentialInput, PredictScalingPotentialOutput
-from .phreeqc_wrapper import run_phreeqc_simulation, PhreeqcError
-from utils.helpers import build_solution_block, build_equilibrium_phases_block, build_selected_output_block
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,7 @@ async def predict_scaling_potential_legacy(input_data: Dict[str, Any]) -> Dict[s
         return {"error": f"Input validation error: {e}"}
 
     # Centralized database resolution with validation and fallback
-    database_path = database_manager.resolve_and_validate_database(
-        input_model.database, category="minerals"
-    )
+    database_path = database_manager.resolve_and_validate_database(input_model.database, category="minerals")
 
     try:
         # Build solution block
@@ -77,9 +76,7 @@ async def predict_scaling_potential_legacy(input_data: Dict[str, Any]) -> Dict[s
             if compatible_minerals:
                 phases_to_force = [{"name": name} for name in compatible_minerals]
                 # Use allow_empty=True since having no compatible minerals is acceptable
-                equilibrium_phases_str = build_equilibrium_phases_block(
-                    phases_to_force, block_num=1, allow_empty=True
-                )
+                equilibrium_phases_str = build_equilibrium_phases_block(phases_to_force, block_num=1, allow_empty=True)
                 if equilibrium_phases_str:
                     phreeqc_input += equilibrium_phases_str
                     phreeqc_input += "USE solution 1\n"  # Need to explicitly use initial solution

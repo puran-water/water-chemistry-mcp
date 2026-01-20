@@ -39,6 +39,7 @@ class WaterChemistryError(Exception):
     All exceptions in this module inherit from this class,
     allowing for broad exception handling when needed.
     """
+
     pass
 
 
@@ -51,6 +52,7 @@ class InputValidationError(WaterChemistryError):
     - Field types are incorrect
     - Incompatible field combinations
     """
+
     pass
 
 
@@ -58,8 +60,10 @@ class InputValidationError(WaterChemistryError):
 # Database Errors
 # =============================================================================
 
+
 class DatabaseError(WaterChemistryError):
     """Base class for database-related errors."""
+
     pass
 
 
@@ -70,11 +74,9 @@ class DatabaseNotFoundError(DatabaseError):
         database_path: The path that was searched
         available_databases: List of available database paths (if known)
     """
+
     def __init__(
-        self,
-        message: str,
-        database_path: Optional[str] = None,
-        available_databases: Optional[List[str]] = None
+        self, message: str, database_path: Optional[str] = None, available_databases: Optional[List[str]] = None
     ):
         super().__init__(message)
         self.database_path = database_path
@@ -93,12 +95,13 @@ class DatabaseLoadError(DatabaseError):
         phreeqc_error: The error message from PHREEQC
         error_count: Number of errors reported by PHREEQC
     """
+
     def __init__(
         self,
         message: str,
         database_path: Optional[str] = None,
         phreeqc_error: Optional[str] = None,
-        error_count: int = 0
+        error_count: int = 0,
     ):
         super().__init__(message)
         self.database_path = database_path
@@ -112,12 +115,14 @@ class DatabaseQueryError(DatabaseError):
     Raised when a database query fails for reasons other than
     the term not being found.
     """
+
     pass
 
 
 # =============================================================================
 # Feature and Simulation Errors
 # =============================================================================
+
 
 class FeatureNotSupportedError(WaterChemistryError):
     """Feature requires capabilities not available without explicit opt-in.
@@ -131,19 +136,19 @@ class FeatureNotSupportedError(WaterChemistryError):
         requires_raw_phreeqc: Whether the feature requires raw PHREEQC input
         remediation: How to enable or work around this
     """
+
     def __init__(
         self,
         message: str,
         feature: Optional[str] = None,
         requires_raw_phreeqc: bool = False,
-        remediation: Optional[str] = None
+        remediation: Optional[str] = None,
     ):
         super().__init__(message)
         self.feature = feature
         self.requires_raw_phreeqc = requires_raw_phreeqc
         self.remediation = remediation or (
-            "Set allow_raw_phreeqc=True to enable this feature"
-            if requires_raw_phreeqc else None
+            "Set allow_raw_phreeqc=True to enable this feature" if requires_raw_phreeqc else None
         )
 
 
@@ -156,12 +161,8 @@ class PhreeqcSimulationError(WaterChemistryError):
         phreeqc_input: The PHREEQC input that caused the error
         phreeqc_error: The error message from PHREEQC
     """
-    def __init__(
-        self,
-        message: str,
-        phreeqc_input: Optional[str] = None,
-        phreeqc_error: Optional[str] = None
-    ):
+
+    def __init__(self, message: str, phreeqc_input: Optional[str] = None, phreeqc_error: Optional[str] = None):
         super().__init__(message)
         self.phreeqc_input = phreeqc_input
         self.phreeqc_error = phreeqc_error
@@ -171,8 +172,10 @@ class PhreeqcSimulationError(WaterChemistryError):
 # Convergence Errors
 # =============================================================================
 
+
 class ConvergenceError(WaterChemistryError):
     """Base class for optimization/search convergence failures."""
+
     pass
 
 
@@ -190,6 +193,7 @@ class DosingConvergenceError(ConvergenceError):
         iterations: Number of iterations performed
         tolerance: The tolerance that was not met
     """
+
     def __init__(
         self,
         message: str,
@@ -198,7 +202,7 @@ class DosingConvergenceError(ConvergenceError):
         target_value: float,
         achieved_value: float,
         iterations: int,
-        tolerance: Optional[float] = None
+        tolerance: Optional[float] = None,
     ):
         super().__init__(message)
         self.last_dose = last_dose
@@ -218,7 +222,7 @@ class DosingConvergenceError(ConvergenceError):
             "achieved_value": self.achieved_value,
             "iterations": self.iterations,
             "tolerance": self.tolerance,
-            "message": str(self)
+            "message": str(self),
         }
 
 
@@ -234,13 +238,14 @@ class OptimizationConvergenceError(ConvergenceError):
         best_solution: The best solution found before failure
         reason: Why the optimization failed
     """
+
     def __init__(
         self,
         message: str,
         strategy: Optional[str] = None,
         objectives: Optional[List[Dict[str, Any]]] = None,
         best_solution: Optional[Dict[str, Any]] = None,
-        reason: Optional[str] = None
+        reason: Optional[str] = None,
     ):
         super().__init__(message)
         self.strategy = strategy
@@ -253,6 +258,7 @@ class OptimizationConvergenceError(ConvergenceError):
 # Definition Errors (for building PHREEQC blocks)
 # =============================================================================
 
+
 class KineticsDefinitionError(WaterChemistryError):
     """Invalid kinetics definition provided.
 
@@ -263,11 +269,9 @@ class KineticsDefinitionError(WaterChemistryError):
         missing_fields: Fields that were expected but missing
         invalid_fields: Fields that had invalid values
     """
+
     def __init__(
-        self,
-        message: str,
-        missing_fields: Optional[List[str]] = None,
-        invalid_fields: Optional[Dict[str, str]] = None
+        self, message: str, missing_fields: Optional[List[str]] = None, invalid_fields: Optional[Dict[str, str]] = None
     ):
         super().__init__(message)
         self.missing_fields = missing_fields or []
@@ -284,11 +288,9 @@ class SurfaceDefinitionError(WaterChemistryError):
         missing_fields: Fields that were expected but missing
         invalid_fields: Fields that had invalid values
     """
+
     def __init__(
-        self,
-        message: str,
-        missing_fields: Optional[List[str]] = None,
-        invalid_fields: Optional[Dict[str, str]] = None
+        self, message: str, missing_fields: Optional[List[str]] = None, invalid_fields: Optional[Dict[str, str]] = None
     ):
         super().__init__(message)
         self.missing_fields = missing_fields or []
@@ -305,12 +307,9 @@ class RedoxSpecificationError(WaterChemistryError):
         value: The value provided
         issue: Description of what's wrong
     """
+
     def __init__(
-        self,
-        message: str,
-        parameter: Optional[str] = None,
-        value: Optional[Any] = None,
-        issue: Optional[str] = None
+        self, message: str, parameter: Optional[str] = None, value: Optional[Any] = None, issue: Optional[str] = None
     ):
         super().__init__(message)
         self.parameter = parameter
@@ -327,12 +326,8 @@ class GasPhaseError(WaterChemistryError):
         gas_components: The gas components specified
         issue: Description of what went wrong
     """
-    def __init__(
-        self,
-        message: str,
-        gas_components: Optional[Dict[str, float]] = None,
-        issue: Optional[str] = None
-    ):
+
+    def __init__(self, message: str, gas_components: Optional[Dict[str, float]] = None, issue: Optional[str] = None):
         super().__init__(message)
         self.gas_components = gas_components
         self.issue = issue
@@ -342,8 +337,10 @@ class GasPhaseError(WaterChemistryError):
 # Thermodynamic Query Errors
 # =============================================================================
 
+
 class ThermoQueryError(WaterChemistryError):
     """Base class for thermodynamic database query errors."""
+
     pass
 
 
@@ -356,13 +353,14 @@ class TermNotFoundError(ThermoQueryError):
         database: The database that was searched
         suggestions: Similar terms that might be what the user meant
     """
+
     def __init__(
         self,
         message: str,
         term: Optional[str] = None,
         query_type: Optional[str] = None,
         database: Optional[str] = None,
-        suggestions: Optional[List[str]] = None
+        suggestions: Optional[List[str]] = None,
     ):
         super().__init__(message)
         self.term = term
@@ -378,12 +376,8 @@ class AmbiguousQueryError(ThermoQueryError):
         term: The term that was searched for
         matches: The items that matched
     """
-    def __init__(
-        self,
-        message: str,
-        term: Optional[str] = None,
-        matches: Optional[List[str]] = None
-    ):
+
+    def __init__(self, message: str, term: Optional[str] = None, matches: Optional[List[str]] = None):
         super().__init__(message)
         self.term = term
         self.matches = matches or []
@@ -392,6 +386,7 @@ class AmbiguousQueryError(ThermoQueryError):
 # =============================================================================
 # Other Errors
 # =============================================================================
+
 
 class ParameterNotFoundError(WaterChemistryError):
     """A requested parameter was not found in the solution/result.
@@ -403,12 +398,8 @@ class ParameterNotFoundError(WaterChemistryError):
         parameter: The parameter that was requested
         available_parameters: Parameters that are available
     """
-    def __init__(
-        self,
-        message: str,
-        parameter: Optional[str] = None,
-        available_parameters: Optional[List[str]] = None
-    ):
+
+    def __init__(self, message: str, parameter: Optional[str] = None, available_parameters: Optional[List[str]] = None):
         super().__init__(message)
         self.parameter = parameter
         self.available_parameters = available_parameters or []
@@ -425,12 +416,13 @@ class BatchSimulationError(WaterChemistryError):
         errors: Dict mapping scenario name to error message
         completed_scenarios: List of scenarios that completed successfully
     """
+
     def __init__(
         self,
         message: str,
         failed_scenarios: Optional[List[str]] = None,
         errors: Optional[Dict[str, str]] = None,
-        completed_scenarios: Optional[List[str]] = None
+        completed_scenarios: Optional[List[str]] = None,
     ):
         super().__init__(message)
         self.failed_scenarios = failed_scenarios or []
@@ -444,5 +436,5 @@ class BatchSimulationError(WaterChemistryError):
             "failed_scenarios": self.failed_scenarios,
             "errors": self.errors,
             "completed_scenarios": self.completed_scenarios,
-            "message": str(self)
+            "message": str(self),
         }

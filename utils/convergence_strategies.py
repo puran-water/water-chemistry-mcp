@@ -4,7 +4,7 @@ Convergence strategies for handling difficult PHREEQC simulations.
 
 import logging
 import re
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

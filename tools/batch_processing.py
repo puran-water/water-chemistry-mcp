@@ -10,20 +10,19 @@ Supports:
 
 import asyncio
 import copy
-from typing import Dict, Any, List, Optional, Tuple
 import logging
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 
 from .chemical_addition import simulate_chemical_addition
-from .solution_speciation import calculate_solution_speciation
 from .ferric_phosphate import calculate_ferric_dose_for_tp
+from .solution_speciation import calculate_solution_speciation
 
 logger = logging.getLogger(__name__)
 
 
-def reconstruct_solution_from_result(
-    result: Dict[str, Any], original_solution: Dict[str, Any]
-) -> Dict[str, Any]:
+def reconstruct_solution_from_result(result: Dict[str, Any], original_solution: Dict[str, Any]) -> Dict[str, Any]:
     """
     Reconstruct a full solution object from PHREEQC calculation results.
 
@@ -294,13 +293,15 @@ async def process_single_scenario(base_solution: Dict[str, Any], scenario: Dict[
                 "target_ph": target_ph,
                 "reagent": "NaOH",
             }
-        return await calculate_ferric_dose_for_tp({
-            "initial_solution": base_solution,
-            "target_residual_p_mg_l": scenario["target_p_mg_l"],
-            "iron_source": scenario.get("coagulant", "FeCl3"),
-            "database": scenario.get("database", "minteq.v4.dat"),
-            "ph_adjustment": ph_adjustment,
-        })
+        return await calculate_ferric_dose_for_tp(
+            {
+                "initial_solution": base_solution,
+                "target_residual_p_mg_l": scenario["target_p_mg_l"],
+                "iron_source": scenario.get("coagulant", "FeCl3"),
+                "database": scenario.get("database", "minteq.v4.dat"),
+                "ph_adjustment": ph_adjustment,
+            }
+        )
 
     elif scenario_type == "multi_reagent_optimization":
         # Simplified multi-reagent optimization using parameter sweeps

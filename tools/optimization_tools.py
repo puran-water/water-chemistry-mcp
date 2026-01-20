@@ -21,18 +21,19 @@ Author: Claude AI
 import asyncio
 import copy
 import logging
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 
-from .chemical_addition import simulate_chemical_addition
-from .solution_speciation import calculate_solution_speciation
-from .schemas import WaterAnalysisInput
-
 from utils.exceptions import (
-    InputValidationError,
     ConvergenceError,
+    InputValidationError,
     OptimizationConvergenceError,
 )
+
+from .chemical_addition import simulate_chemical_addition
+from .schemas import WaterAnalysisInput
+from .solution_speciation import calculate_solution_speciation
 
 logger = logging.getLogger(__name__)
 
@@ -77,23 +78,27 @@ async def generate_lime_softening_curve(input_data: Dict[str, Any]) -> Dict[str,
     # Create scenarios for batch processing
     scenarios = []
     for dose in lime_doses:
-        scenarios.append({
-            "name": f"Lime_{dose}mmol",
-            "type": "chemical_addition",
-            "reactants": [{"formula": "Ca(OH)2", "amount": dose, "units": "mmol"}],
-            "equilibrium_minerals": None,  # Use full database mineral list
-        })
+        scenarios.append(
+            {
+                "name": f"Lime_{dose}mmol",
+                "type": "chemical_addition",
+                "reactants": [{"formula": "Ca(OH)2", "amount": dose, "units": "mmol"}],
+                "equilibrium_minerals": None,  # Use full database mineral list
+            }
+        )
 
     # Import batch processing to avoid circular imports
     from .batch_processing import batch_process_scenarios as _batch_process
 
     # Run batch processing
-    results = await _batch_process({
-        "base_solution": initial_water,
-        "scenarios": scenarios,
-        "parallel_limit": 10,
-        "output_format": "full",
-    })
+    results = await _batch_process(
+        {
+            "base_solution": initial_water,
+            "scenarios": scenarios,
+            "parallel_limit": 10,
+            "output_format": "full",
+        }
+    )
 
     # Extract curve data
     curve_data = []
@@ -108,12 +113,14 @@ async def generate_lime_softening_curve(input_data: Dict[str, Any]) -> Dict[str,
             mg = elements.get("Mg", 0) or 0
             hardness = (ca + mg) * 100000  # mg/L as CaCO3
 
-            curve_data.append({
-                "lime_dose_mmol": scenario["reactants"][0]["amount"],
-                "pH": result.get("solution_summary", {}).get("pH", 0),
-                "hardness_mg_caco3": hardness,
-                "precipitate_g_L": result.get("total_precipitate_g_L", 0),
-            })
+            curve_data.append(
+                {
+                    "lime_dose_mmol": scenario["reactants"][0]["amount"],
+                    "pH": result.get("solution_summary", {}).get("pH", 0),
+                    "hardness_mg_caco3": hardness,
+                    "precipitate_g_L": result.get("total_precipitate_g_L", 0),
+                }
+            )
 
     # Sort by dose
     curve_data.sort(key=lambda x: x["lime_dose_mmol"])
@@ -127,9 +134,7 @@ async def generate_lime_softening_curve(input_data: Dict[str, Any]) -> Dict[str,
     }
 
 
-def _find_optimal_dose(
-    curve_data: List[Dict[str, Any]], target_hardness: float
-) -> Optional[Dict[str, Any]]:
+def _find_optimal_dose(curve_data: List[Dict[str, Any]], target_hardness: float) -> Optional[Dict[str, Any]]:
     """Find the dose that achieves target hardness via linear interpolation."""
     if not curve_data:
         return None
@@ -227,12 +232,14 @@ async def calculate_lime_softening_dose(input_data: Dict[str, Any]) -> Dict[str,
 
     for dose in doses:
         try:
-            result = await simulate_chemical_addition({
-                "initial_solution": initial_water,
-                "reactants": [{"formula": "Ca(OH)2", "amount": float(dose), "units": "mmol"}],
-                "allow_precipitation": True,
-                "database": database,
-            })
+            result = await simulate_chemical_addition(
+                {
+                    "initial_solution": initial_water,
+                    "reactants": [{"formula": "Ca(OH)2", "amount": float(dose), "units": "mmol"}],
+                    "allow_precipitation": True,
+                    "database": database,
+                }
+            )
 
             # Calculate hardness from result
             ca_final = result.get("element_totals_molality", {}).get("Ca", 0) or 0
@@ -350,6 +357,7 @@ async def calculate_dosing_requirement_enhanced(input_data: Dict[str, Any]) -> D
     else:
         # For 3+ reagents, use meshgrid
         import itertools
+
         dose_combinations = list(itertools.product(*dose_grids))
 
     # Evaluate each combination
@@ -368,20 +376,24 @@ async def calculate_dosing_requirement_enhanced(input_data: Dict[str, Any]) -> D
             # Build reactants list
             reactants = []
             for i, reagent in enumerate(reagents):
-                reactants.append({
-                    "formula": reagent["formula"],
-                    "amount": float(doses[i]),
-                    "units": "mmol",
-                })
+                reactants.append(
+                    {
+                        "formula": reagent["formula"],
+                        "amount": float(doses[i]),
+                        "units": "mmol",
+                    }
+                )
 
             # Simulate
-            result = await simulate_chemical_addition({
-                "initial_solution": initial_solution,
-                "reactants": reactants,
-                "allow_precipitation": allow_precipitation,
-                "equilibrium_minerals": equilibrium_minerals,
-                "database": database,
-            })
+            result = await simulate_chemical_addition(
+                {
+                    "initial_solution": initial_solution,
+                    "reactants": reactants,
+                    "allow_precipitation": allow_precipitation,
+                    "equilibrium_minerals": equilibrium_minerals,
+                    "database": database,
+                }
+            )
 
             if isinstance(result, dict) and result.get("error"):
                 continue
@@ -414,11 +426,13 @@ async def calculate_dosing_requirement_enhanced(input_data: Dict[str, Any]) -> D
 
             # Track path
             dose_dict = {reagents[i]["formula"]: float(doses[i]) for i in range(n_reagents)}
-            optimization_path.append({
-                "doses": dose_dict,
-                "score": score,
-                "objectives": obj_values,
-            })
+            optimization_path.append(
+                {
+                    "doses": dose_dict,
+                    "score": score,
+                    "objectives": obj_values,
+                }
+            )
 
             if score < best_score:
                 best_score = score
@@ -555,9 +569,7 @@ async def optimize_multi_reagent_treatment(input_data: Dict[str, Any]) -> Dict[s
             initial_water, reagents, objectives, grid_points, database, allow_precipitation
         )
     elif strategy == "robust":
-        return await _optimize_robust(
-            initial_water, reagents, objectives, grid_points, database, allow_precipitation
-        )
+        return await _optimize_robust(initial_water, reagents, objectives, grid_points, database, allow_precipitation)
     else:
         raise InputValidationError(
             f"Unknown optimization strategy: {strategy}. "
@@ -575,14 +587,16 @@ async def _optimize_weighted_sum(
 ) -> Dict[str, Any]:
     """Weighted sum optimization - scalarize objectives and find single optimum."""
     # Use calculate_dosing_requirement_enhanced internally
-    result = await calculate_dosing_requirement_enhanced({
-        "initial_solution": initial_water,
-        "reagents": reagents,
-        "objectives": objectives,
-        "optimization_method": "grid_search",
-        "database": database,
-        "allow_precipitation": allow_precipitation,
-    })
+    result = await calculate_dosing_requirement_enhanced(
+        {
+            "initial_solution": initial_water,
+            "reagents": reagents,
+            "objectives": objectives,
+            "optimization_method": "grid_search",
+            "database": database,
+            "allow_precipitation": allow_precipitation,
+        }
+    )
 
     opt_summary = result.get("optimization_summary", {})
 
@@ -618,6 +632,7 @@ async def _optimize_pareto_front(
         dose_combinations = [[d1, d2] for d1 in dose_grids[0] for d2 in dose_grids[1]]
     else:
         import itertools
+
         dose_combinations = list(itertools.product(*dose_grids))
 
     # Evaluate all combinations
@@ -630,12 +645,14 @@ async def _optimize_pareto_front(
                 for i in range(n_reagents)
             ]
 
-            result = await simulate_chemical_addition({
-                "initial_solution": initial_water,
-                "reactants": reactants,
-                "allow_precipitation": allow_precipitation,
-                "database": database,
-            })
+            result = await simulate_chemical_addition(
+                {
+                    "initial_solution": initial_water,
+                    "reactants": reactants,
+                    "allow_precipitation": allow_precipitation,
+                    "database": database,
+                }
+            )
 
             if isinstance(result, dict) and result.get("error"):
                 continue
@@ -649,10 +666,12 @@ async def _optimize_pareto_front(
 
             if len(obj_values) == len(objectives):
                 dose_dict = {reagents[i]["formula"]: float(doses[i]) for i in range(n_reagents)}
-                all_solutions.append({
-                    "doses": dose_dict,
-                    "objectives": obj_values,
-                })
+                all_solutions.append(
+                    {
+                        "doses": dose_dict,
+                        "objectives": obj_values,
+                    }
+                )
 
         except Exception as e:
             logger.debug(f"Dose combination failed: {e}")
@@ -703,7 +722,7 @@ async def _optimize_pareto_front(
                 param = obj["parameter"]
                 target = obj["value"]
                 deviation = abs(sol["objectives"][param] - target) / max(abs(target), 1e-6)
-                distance += deviation ** 2
+                distance += deviation**2
 
             if distance < best_distance:
                 best_distance = distance
@@ -745,12 +764,14 @@ async def _optimize_sequential(
 
         for dose in doses:
             try:
-                result = await simulate_chemical_addition({
-                    "initial_solution": current_water,
-                    "reactants": [{"formula": formula, "amount": float(dose), "units": "mmol"}],
-                    "allow_precipitation": allow_precipitation,
-                    "database": database,
-                })
+                result = await simulate_chemical_addition(
+                    {
+                        "initial_solution": current_water,
+                        "reactants": [{"formula": formula, "amount": float(dose), "units": "mmol"}],
+                        "allow_precipitation": allow_precipitation,
+                        "database": database,
+                    }
+                )
 
                 if isinstance(result, dict) and result.get("error"):
                     continue
@@ -775,15 +796,18 @@ async def _optimize_sequential(
 
         if best_dose is not None:
             optimal_doses[formula] = best_dose
-            optimization_path.append({
-                "reagent": formula,
-                "optimal_dose": best_dose,
-                "score": best_score,
-            })
+            optimization_path.append(
+                {
+                    "reagent": formula,
+                    "optimal_dose": best_dose,
+                    "score": best_score,
+                }
+            )
 
             # Update current water for next reagent (reconstruct from result)
             if best_result:
                 from .batch_processing import reconstruct_solution_from_result
+
                 current_water = reconstruct_solution_from_result(best_result, current_water)
 
     # Get final objective results
@@ -830,6 +854,7 @@ async def _optimize_robust(
         dose_combinations = [[d1, d2] for d1 in dose_grids[0] for d2 in dose_grids[1]]
     else:
         import itertools
+
         dose_combinations = list(itertools.product(*dose_grids))
 
     best_doses = None
@@ -844,12 +869,14 @@ async def _optimize_robust(
                 for i in range(n_reagents)
             ]
 
-            result = await simulate_chemical_addition({
-                "initial_solution": initial_water,
-                "reactants": reactants,
-                "allow_precipitation": allow_precipitation,
-                "database": database,
-            })
+            result = await simulate_chemical_addition(
+                {
+                    "initial_solution": initial_water,
+                    "reactants": reactants,
+                    "allow_precipitation": allow_precipitation,
+                    "database": database,
+                }
+            )
 
             if isinstance(result, dict) and result.get("error"):
                 continue
@@ -888,12 +915,14 @@ async def _optimize_robust(
                         dose += delta
                     reactants.append({"formula": r["formula"], "amount": dose, "units": "mmol"})
 
-                perturbed = await simulate_chemical_addition({
-                    "initial_solution": initial_water,
-                    "reactants": reactants,
-                    "allow_precipitation": allow_precipitation,
-                    "database": database,
-                })
+                perturbed = await simulate_chemical_addition(
+                    {
+                        "initial_solution": initial_water,
+                        "reactants": reactants,
+                        "allow_precipitation": allow_precipitation,
+                        "database": database,
+                    }
+                )
 
                 if not (isinstance(perturbed, dict) and perturbed.get("error")):
                     # Calculate change in objective

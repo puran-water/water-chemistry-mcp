@@ -40,9 +40,14 @@ jobs:
         pip install -r requirements.txt
         pip install pytest pytest-cov pytest-asyncio
 
-    - name: Create test databases directory
-      run: |
-        mkdir -p databases/official
+    - name: Create test databases directory (Unix)
+      if: runner.os != 'Windows'
+      run: mkdir -p databases/official
+
+    - name: Create test databases directory (Windows)
+      if: runner.os == 'Windows'
+      run: New-Item -ItemType Directory -Path databases/official -Force
+      shell: pwsh
 
     - name: Download test databases (Linux/MacOS)
       if: runner.os != 'Windows'

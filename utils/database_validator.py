@@ -5,12 +5,12 @@ This module provides functionality to validate PHREEQC thermodynamic databases
 and extract structured information about their contents.
 """
 
-import re
-import os
-import logging
-import time
 import hashlib
-from typing import List, Dict, Optional, Set, Tuple, Any, Union
+import logging
+import os
+import re
+import time
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 logger = logging.getLogger(__name__)
 

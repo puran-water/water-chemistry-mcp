@@ -33,11 +33,21 @@ class RedoxSpecification(BaseModel):
         "aerobic",
         description=(
             "Redox mode for simulation: "
-            "'aerobic' (pe=+8, Fe(III) dominates), "
-            "'anaerobic' (pe=-4, Fe(II) dominates), "
+            "'aerobic' (pe=+3.5, typical ORP ~200mV for aerated biological treatment; Fe(III) dominates), "
+            "'anaerobic' (pe=-4 via Fix_pe, Fe(II) dominates), "
             "'pe_from_orp' (calculate pe from ORP measurement), "
             "'fixed_pe' (use specified pe value), "
             "'fixed_fe2_fraction' (experimental: specify Fe(II)/Fe ratio, uses Nernst approximation)."
+        ),
+    )
+    fix_pe: bool = Field(
+        True,
+        description=(
+            "Whether to constrain pe throughout simulation using pseudo-phase equilibrium. "
+            "If True (default): pe is fixed using Fix_pe pseudo-phase (anaerobic) or O2(g) "
+            "equilibrium (aerobic). This prevents pe drift when oxidizing/reducing agents "
+            "are added and models systems with sufficient redox buffering capacity. "
+            "If False: pe is set initially but allowed to drift based on solution equilibrium."
         ),
     )
     orp_mv: Optional[float] = Field(
@@ -302,6 +312,85 @@ class PhosphatePartitioning(BaseModel):
     )
 
 
+# --- Mechanistic Partition Output (NEW) ---
+
+class MechanisticPartition(BaseModel):
+    """Detailed mechanistic partition showing WHERE P and Fe ended up.
+
+    This allows verification of which mechanisms are driving P removal:
+    - Adsorption (HFO surface complexation)
+    - Precipitation (Strengite, Vivianite)
+    - Mixed (both contribute significantly)
+    """
+
+    # Phosphorus partitioning (mmol/L)
+    p_on_hfo_surfaces_mmol: float = Field(
+        ..., description="P adsorbed on HFO surfaces (mmol/L)."
+    )
+    p_in_strengite_mmol: float = Field(
+        ..., description="P in Strengite precipitate (mmol/L)."
+    )
+    p_in_vivianite_mmol: float = Field(
+        ..., description="P in Vivianite precipitate (mmol/L)."
+    )
+    p_dissolved_mmol: float = Field(
+        ..., description="Residual dissolved P (mmol/L)."
+    )
+
+    # Iron partitioning (mmol/L)
+    fe_in_ferrihydrite_mmol: float = Field(
+        ..., description="Fe in Ferrihydrite/Fe(OH)3 (mmol/L)."
+    )
+    fe_in_vivianite_mmol: float = Field(
+        ..., description="Fe in Vivianite (mmol/L). Note: Vivianite = Fe3(PO4)2, so 3 Fe per formula."
+    )
+    fe_in_fes_mmol: float = Field(
+        ..., description="Fe in FeS (mackinawite/amorphous) (mmol/L)."
+    )
+    fe_in_siderite_mmol: float = Field(
+        ..., description="Fe in Siderite FeCO3 (mmol/L)."
+    )
+    fe_dissolved_mmol: float = Field(
+        ..., description="Residual dissolved Fe (mmol/L)."
+    )
+
+    # Mechanism attribution
+    p_removal_dominant_mechanism: str = Field(
+        ...,
+        description=(
+            "Dominant P removal mechanism: 'adsorption' (HFO surface), "
+            "'precipitation' (Strengite/Vivianite), or 'mixed' (both contribute)."
+        )
+    )
+    p_removal_by_adsorption_percent: float = Field(
+        ..., description="Percentage of removed P via adsorption."
+    )
+    p_removal_by_precipitation_percent: float = Field(
+        ..., description="Percentage of removed P via precipitation."
+    )
+
+
+class MarginalFePRatio(BaseModel):
+    """Marginal Fe:P ratio showing incremental cost at current operating point.
+
+    While average Fe:P shows overall efficiency, marginal Fe:P shows the
+    incremental Fe needed per additional P removed - critical for evaluating
+    the cost of pushing to lower P targets.
+    """
+
+    value_molar: float = Field(
+        ..., description="Marginal dFe/dP in molar ratio (mmol Fe per mmol P removed)."
+    )
+    description: str = Field(
+        default="Additional Fe per additional P removed at current target",
+        description="What this metric represents."
+    )
+    interpretation: str = Field(
+        ...,
+        description="Interpretation guidance (e.g., 'High values (>5) indicate diminishing returns')."
+    )
+
+
 class IronPartitioning(BaseModel):
     """Iron partitioning between phases."""
 
@@ -408,6 +497,27 @@ class CalculateFerricDoseOutput(SolutionOutput):
     )
     iron_partitioning: Optional[IronPartitioning] = Field(
         None, description="Iron distribution between dissolved and precipitated phases."
+    )
+    mechanistic_partition: Optional[MechanisticPartition] = Field(
+        None,
+        description=(
+            "Detailed mechanistic breakdown showing WHERE P and Fe went. "
+            "Use to verify whether removal is adsorption-driven or precipitation-driven."
+        )
+    )
+    marginal_fe_to_p: Optional[MarginalFePRatio] = Field(
+        None,
+        description=(
+            "Marginal Fe:P ratio (dFe/dP) at current operating point. "
+            "Shows incremental cost of pushing to lower P targets."
+        )
+    )
+    sulfide_assumption: Optional[str] = Field(
+        None,
+        description=(
+            "Sulfide modeling assumption: 'sulfide_free_limit' (no S(-2) specified, "
+            "represents optimistic lower bound) or 'with_sulfide' (FeS competition modeled)."
+        )
     )
     precipitated_phases: Optional[Dict[str, float]] = Field(
         None, description="All precipitated phases and their amounts in mmol."

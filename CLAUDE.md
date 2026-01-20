@@ -24,12 +24,14 @@ AI agent with access to Water Chemistry MCP Server for industrial wastewater tre
 10. `simulate_redox_adjustment` - Redox potential (pe/Eh) control
 11. `simulate_surface_interaction` - Surface complexation modeling
 
-**Optimization Tools (5 tools):**
+**Optimization Tools (4 tools):**
 12. `generate_lime_softening_curve` - Complete dose-response curves
 13. `calculate_lime_softening_dose` - Optimal lime softening dose
-14. `optimize_phosphorus_removal` - P removal with coagulant selection
-15. `calculate_dosing_requirement_enhanced` - Multi-objective dosing optimization
-16. `optimize_multi_reagent_treatment` - Multi-reagent with 4 strategies
+14. `calculate_dosing_requirement_enhanced` - Multi-objective dosing optimization
+15. `optimize_multi_reagent_treatment` - Multi-reagent with 4 strategies
+
+**Fe-P Precipitation Tool (1 tool):**
+16. `calculate_ferric_dose_for_tp` - Optimal Fe dose for target P removal with HFO surface complexation, mechanistic partition output, and marginal Fe:P analysis
 
 ### Scientific Integrity & Engineering Efficiency
 - **PHREEQC thermodynamics only** - All results from validated PHREEQC calculations
@@ -245,28 +247,7 @@ Calculate optimal lime dose for target hardness with smart bounds.
 }
 ```
 
-### 14. optimize_phosphorus_removal
-Optimize coagulant dose for phosphorus removal with optional pH control.
-
-**Required format:**
-```json
-{
-    "initial_water": {
-        "units": "mmol/L",
-        "analysis": {"Ca": 1.0, "Mg": 0.5, "Alkalinity": 2.0, "P": 0.1},
-        "pH": 7.0,
-        "database": "minteq.v4.dat"
-    },
-    "target_p_mg_l": 0.5,
-    "coagulant": "FeCl3",
-    "target_ph": 6.5,
-    "database": "minteq.v4.dat"
-}
-```
-
-**Supported coagulants:** FeCl3, FeSO4, Al2(SO4)3
-
-### 15. calculate_dosing_requirement_enhanced
+### 14. calculate_dosing_requirement_enhanced
 Multi-objective dosing optimization with multiple reagents and objectives.
 
 **Required format:**
@@ -293,7 +274,7 @@ Multi-objective dosing optimization with multiple reagents and objectives.
 
 **Supported parameters:** pH, pe, total_hardness, residual_phosphorus, alkalinity, SI
 
-### 16. optimize_multi_reagent_treatment
+### 15. optimize_multi_reagent_treatment
 Advanced multi-reagent optimization with 4 strategy options.
 
 **Required format:**
@@ -323,6 +304,60 @@ Advanced multi-reagent optimization with 4 strategy options.
 - `pareto_front` - Non-dominated solutions for multi-objective trade-offs
 - `sequential` - Optimize reagents one at a time
 - `robust` - Best worst-case performance
+
+### 16. calculate_ferric_dose_for_tp
+Calculate optimal ferric/ferrous dose for target phosphorus removal with HFO surface complexation.
+
+**Required format (aerobic):**
+```json
+{
+    "initial_solution": {
+        "ph": 7.0,
+        "analysis": {
+            "P": 5.0,
+            "Ca": 50,
+            "Mg": 10,
+            "Alkalinity": "as CaCO3 100"
+        },
+        "units": "mg/L"
+    },
+    "target_residual_p_mg_l": 0.5,
+    "iron_source": "FeCl3",
+    "database": "minteq.v4.dat"
+}
+```
+
+**Anaerobic format (with sulfide):**
+```json
+{
+    "initial_solution": {
+        "ph": 7.2,
+        "analysis": {
+            "P": 150.0,
+            "S(-2)": 40.0,
+            "Alkalinity": "as CaCO3 3000"
+        },
+        "units": "mg/L"
+    },
+    "target_residual_p_mg_l": 30.0,
+    "iron_source": "FeSO4",
+    "redox": {"mode": "anaerobic"},
+    "database": "minteq.v4.dat"
+}
+```
+
+**Key features:**
+- **Redox modes**: `aerobic` (pe=3.5), `anaerobic` (pe=-4), `pe_from_orp`, `fixed_pe`
+- **HFO surface complexation**: Phase-linked sites scale with Ferrihydrite amount
+- **pH adjustment**: Optional nested binary search for simultaneous pH control
+- **Iron sources**: FeCl3, FeSO4, FeCl2, Fe2(SO4)3
+
+**New output fields (v2.3):**
+- `mechanistic_partition` - Shows WHERE P and Fe went (surfaces vs solids)
+- `marginal_fe_to_p` - Incremental dFe/dP at current target (reveals diminishing returns)
+- `sulfide_assumption` - Flags sulfide-free anaerobic results as optimistic
+
+**Warning:** Anaerobic mode without S(-2) gives Fe:P ≈ 1.6 (sulfide-free limit). Real digesters have sulfide → expect Fe:P = 2.5-5+.
 
 ---
 
@@ -552,15 +587,17 @@ result = batch_process_scenarios({
 - Heavy metals: NaOH → Metal(OH)n at pH 9-11
 
 **Remember**:
-1. **5 tools available** - 4 core tools + batch_process_scenarios (with 9 scenario types)
-2. **Use batch processing** for optimization - scenario types handle P removal, lime softening, etc.
-3. **Use exact input templates** to avoid validation errors
-4. **Always wrap concentrations** in `analysis` object
-5. **Include required fields**: `units`, `database`, `temperature_celsius`
-6. **Use PHREEQC notation** and mmol/L units
+1. **16 tools available** - Core analysis, dosing, optimization, and Fe-P precipitation
+2. **Use batch processing** for multiple similar calculations - scenario types handle sweeps, optimization
+3. **Use `calculate_ferric_dose_for_tp`** for Fe-P precipitation with mechanistic output
+4. **Use exact input templates** to avoid validation errors
+5. **Always wrap concentrations** in `analysis` object
+6. **Include required fields**: `units`, `database`, `temperature_celsius`
+7. **Use PHREEQC notation** and mmol/L units
 
 ## Server Status: ✅ **PRODUCTION READY**
 - **Server name**: `water_chemistry_mcp`
-- **5 registered tools** with MCP annotations
+- **16 registered tools** with MCP annotations
 - **PHREEQC thermodynamics only** - All results from validated calculations
-- **Batch optimization** - phosphorus, lime softening, multi-reagent via scenario types
+- **Fe-P precipitation** - HFO surface complexation, mechanistic partition, marginal Fe:P analysis
+- **Multi-objective optimization** - Pareto front, weighted sum, sequential, robust strategies

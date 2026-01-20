@@ -79,11 +79,20 @@ jobs:
         python -m mypy tools/ utils/ --ignore-missing-imports
       continue-on-error: true
 
-    - name: Verify database files exist
+    - name: Verify database files exist (Unix)
+      if: runner.os != 'Windows'
       run: |
         echo "Checking for PHREEQC databases..."
-        ls -la databases/official/ || dir databases\official
+        ls -la databases/official/
         python -c "import os; print('phreeqc.dat exists:', os.path.exists('databases/official/phreeqc.dat'))"
+
+    - name: Verify database files exist (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        Write-Host "Checking for PHREEQC databases..."
+        Get-ChildItem databases\official
+        python -c "import os; print('phreeqc.dat exists:', os.path.exists('databases/official/phreeqc.dat'))"
+      shell: pwsh
 
     - name: Run unit tests
       continue-on-error: true

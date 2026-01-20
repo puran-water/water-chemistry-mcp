@@ -28,27 +28,20 @@ jobs:
         pip install -r requirements.txt
         pip install pytest pytest-asyncio
 
-    - name: Create databases directory
+    - name: Verify PHREEQC databases exist
       run: |
-        mkdir -p databases/official
-
-    - name: Download PHREEQC databases
-      run: |
-        cd databases/official
-        # Download test databases from USGS PHREEQC GitHub repository
-        curl -L -o minteq.v4.dat "https://raw.githubusercontent.com/usgs-coupled/phreeqc3/master/database/minteq.v4.dat" || echo "Failed to download minteq.v4.dat"
-        curl -L -o phreeqc.dat "https://raw.githubusercontent.com/usgs-coupled/phreeqc3/master/database/phreeqc.dat" || echo "Failed to download phreeqc.dat"
-        # Verify downloads succeeded
-        if [ -f minteq.v4.dat ] && [ -s minteq.v4.dat ]; then
-          echo "✓ minteq.v4.dat downloaded successfully ($(wc -l < minteq.v4.dat) lines)"
+        echo "Checking for PHREEQC databases in repo..."
+        ls -la databases/official/
+        if [ -f databases/official/phreeqc.dat ] && [ -s databases/official/phreeqc.dat ]; then
+          echo "✓ phreeqc.dat exists ($(wc -l < databases/official/phreeqc.dat) lines)"
         else
-          echo "✗ Failed to download minteq.v4.dat"
+          echo "✗ phreeqc.dat missing or empty"
           exit 1
         fi
-        if [ -f phreeqc.dat ] && [ -s phreeqc.dat ]; then
-          echo "✓ phreeqc.dat downloaded successfully ($(wc -l < phreeqc.dat) lines)"
+        if [ -f databases/official/minteq.v4.dat ] && [ -s databases/official/minteq.v4.dat ]; then
+          echo "✓ minteq.v4.dat exists ($(wc -l < databases/official/minteq.v4.dat) lines)"
         else
-          echo "✗ Failed to download phreeqc.dat"
+          echo "✗ minteq.v4.dat missing or empty"
           exit 1
         fi
 
@@ -101,8 +94,9 @@ jobs:
             from tools.schemas import PredictScalingPotentialInput
 
             try:
-                # Use explicit database path from environment
-                db_path = os.path.join(os.environ['USGS_PHREEQC_DATABASE_PATH'], 'minteq.v4.dat')
+                # Use database from repo
+                db_path = os.path.join(os.environ['USGS_PHREEQC_DATABASE_PATH'], 'phreeqc.dat')
+                print(f'Using database: {db_path}')
                 input_data = PredictScalingPotentialInput(
                     ph=7.5,
                     temperature_celsius=25,
@@ -138,8 +132,9 @@ jobs:
             from tools.schemas import CalculateSolutionSpeciationInput
 
             try:
-                # Use explicit database path from environment
+                # Use database from repo
                 db_path = os.path.join(os.environ['USGS_PHREEQC_DATABASE_PATH'], 'phreeqc.dat')
+                print(f'Using database: {db_path}')
                 input_data = CalculateSolutionSpeciationInput(
                     ph=7.5,
                     temperature_celsius=25,
@@ -178,8 +173,9 @@ jobs:
             )
 
             try:
-                # Use explicit database path from environment
-                db_path = os.path.join(os.environ['USGS_PHREEQC_DATABASE_PATH'], 'minteq.v4.dat')
+                # Use database from repo
+                db_path = os.path.join(os.environ['USGS_PHREEQC_DATABASE_PATH'], 'phreeqc.dat')
+                print(f'Using database: {db_path}')
                 input_data = SimulateChemicalAdditionInput(
                     database=db_path,
                     reactants=[ReactantInput(amount=2, formula='Ca(OH)2')],

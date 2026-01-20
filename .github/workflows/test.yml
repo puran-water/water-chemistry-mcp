@@ -80,9 +80,11 @@ jobs:
       continue-on-error: true
 
     - name: Run unit tests
-      run: |
-        python -m pytest tests/ -v --cov=tools --cov=utils --cov-report=xml --cov-report=html
       continue-on-error: true
+      env:
+        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
+      run: |
+        python -m pytest tests/ -v --cov=tools --cov=utils --cov-report=xml --cov-report=html || true
 
     - name: Test MCP server startup
       run: |

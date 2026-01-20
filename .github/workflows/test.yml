@@ -79,20 +79,33 @@ jobs:
         python -m mypy tools/ utils/ --ignore-missing-imports
       continue-on-error: true
 
+    - name: Verify database files exist
+      run: |
+        echo "Checking for PHREEQC databases..."
+        ls -la databases/official/ || dir databases\official
+        python -c "import os; print('phreeqc.dat exists:', os.path.exists('databases/official/phreeqc.dat'))"
+
     - name: Run unit tests
       continue-on-error: true
       env:
         USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
+        PHREEQC_DATABASE_DIR: ${{ github.workspace }}/databases/official
       run: |
         python -m pytest tests/ -v --cov=tools --cov=utils --cov-report=xml --cov-report=html || true
 
     - name: Test MCP server startup
+      env:
+        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
+        PHREEQC_DATABASE_DIR: ${{ github.workspace }}/databases/official
       run: |
         timeout 30s python server.py --test || true
       shell: bash
       continue-on-error: true
 
     - name: Test individual tools
+      env:
+        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
+        PHREEQC_DATABASE_DIR: ${{ github.workspace }}/databases/official
       run: |
         python -c "
         import sys

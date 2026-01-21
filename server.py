@@ -50,12 +50,6 @@ from tools.chemical_addition import simulate_chemical_addition
 # NEW: Dosing requirement (phreeqpython API implementation)
 from tools.dosing_requirement import calculate_dosing_requirement
 
-# Unified phosphorus removal tool (supports Fe, Al, Mg, Ca strategies)
-from tools.phosphorus_removal import calculate_phosphorus_removal_dose
-
-# NEW: Engine status for diagnostics
-from tools.phreeqc_wrapper import get_engine_status
-
 # NEW: Advanced PHREEQC features
 from tools.gas_phase import simulate_gas_phase_interaction
 
@@ -69,6 +63,12 @@ from tools.optimization_tools import (
     generate_lime_softening_curve,
     optimize_multi_reagent_treatment,
 )
+
+# Unified phosphorus removal tool (supports Fe, Al, Mg, Ca strategies)
+from tools.phosphorus_removal import calculate_phosphorus_removal_dose
+
+# NEW: Engine status for diagnostics
+from tools.phreeqc_wrapper import get_engine_status
 from tools.redox_adjustment import simulate_redox_adjustment
 from tools.scaling_potential import predict_scaling_potential
 from tools.solution_mixing import simulate_solution_mixing

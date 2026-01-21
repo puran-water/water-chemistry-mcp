@@ -5,7 +5,7 @@ AI agent with access to Water Chemistry MCP Server for industrial wastewater tre
 
 ### Server: `water_chemistry_mcp`
 
-**16 Registered Tools:**
+**17 Registered Tools:**
 
 **Core Analysis (5 tools):**
 1. `calculate_solution_speciation` - Water quality analysis
@@ -24,14 +24,15 @@ AI agent with access to Water Chemistry MCP Server for industrial wastewater tre
 10. `simulate_redox_adjustment` - Redox potential (pe/Eh) control
 11. `simulate_surface_interaction` - Surface complexation modeling
 
-**Optimization Tools (4 tools):**
+**Optimization Tools (5 tools):**
 12. `generate_lime_softening_curve` - Complete dose-response curves
 13. `calculate_lime_softening_dose` - Optimal lime softening dose
 14. `calculate_dosing_requirement_enhanced` - Multi-objective dosing optimization
 15. `optimize_multi_reagent_treatment` - Multi-reagent with 4 strategies
+16. `calculate_phosphorus_removal_dose` - Unified P removal (Fe/Al/Mg/Ca strategies) with HFO/HAO surface complexation
 
-**Fe-P Precipitation Tool (1 tool):**
-16. `calculate_ferric_dose_for_tp` - Optimal Fe dose for target P removal with HFO surface complexation, mechanistic partition output, and marginal Fe:P analysis
+**Diagnostics (1 tool):**
+17. `get_engine_status` - Engine health check and database availability
 
 ### Scientific Integrity & Engineering Efficiency
 - **PHREEQC thermodynamics only** - All results from validated PHREEQC calculations
@@ -305,10 +306,18 @@ Advanced multi-reagent optimization with 4 strategy options.
 - `sequential` - Optimize reagents one at a time
 - `robust` - Best worst-case performance
 
-### 16. calculate_ferric_dose_for_tp
-Calculate optimal ferric/ferrous dose for target phosphorus removal with HFO surface complexation.
+### 16. calculate_phosphorus_removal_dose
+Unified phosphorus removal tool supporting 4 strategies: iron, aluminum, struvite, calcium phosphate.
 
-**Required format (aerobic):**
+**Strategies:**
+| Strategy | Reagents | Mechanism | Typical Metal:P |
+|----------|----------|-----------|-----------------|
+| `iron` | FeCl3, FeSO4, FeCl2 | HFO adsorption + Strengite/Vivianite | 2.0-3.5 |
+| `aluminum` | AlCl3, Al2(SO4)3 | HAO adsorption + Variscite | 2.5-4.0 |
+| `struvite` | MgCl2, MgO, Mg(OH)2 | Struvite crystallization | 1.0 (stoich) |
+| `calcium_phosphate` | Ca(OH)2, CaCl2 | Brushite/HAP precipitation | 1.5-2.0 |
+
+**Iron coagulant example:**
 ```json
 {
     "initial_solution": {
@@ -322,42 +331,62 @@ Calculate optimal ferric/ferrous dose for target phosphorus removal with HFO sur
         "units": "mg/L"
     },
     "target_residual_p_mg_l": 0.5,
-    "iron_source": "FeCl3",
+    "strategy": {
+        "strategy": "iron",
+        "reagent": "FeCl3"
+    },
     "database": "minteq.v4.dat"
 }
 ```
 
-**Anaerobic format (with sulfide):**
+**Aluminum coagulant example:**
 ```json
 {
     "initial_solution": {
-        "ph": 7.2,
-        "analysis": {
-            "P": 150.0,
-            "S(-2)": 40.0,
-            "Alkalinity": "as CaCO3 3000"
-        },
+        "ph": 6.5,
+        "analysis": {"P": 8.0, "Ca": 60, "Alkalinity": "as CaCO3 120"},
         "units": "mg/L"
     },
-    "target_residual_p_mg_l": 30.0,
-    "iron_source": "FeSO4",
-    "redox": {"mode": "anaerobic"},
+    "target_residual_p_mg_l": 0.3,
+    "strategy": {
+        "strategy": "aluminum",
+        "reagent": "AlCl3"
+    },
+    "database": "minteq.v4.dat"
+}
+```
+
+**Struvite example (requires ammonia):**
+```json
+{
+    "initial_solution": {
+        "ph": 7.5,
+        "analysis": {"P": 50.0, "N(-3)": 200, "Mg": 10, "Alkalinity": "as CaCO3 500"},
+        "units": "mg/L"
+    },
+    "target_residual_p_mg_l": 5.0,
+    "strategy": {
+        "strategy": "struvite",
+        "reagent": "MgCl2",
+        "si_trigger": 0.5
+    },
     "database": "minteq.v4.dat"
 }
 ```
 
 **Key features:**
+- **4 strategies**: iron, aluminum, struvite, calcium_phosphate
+- **Inline PHREEQC blocks**: Auto-adds Struvite, Variscite, HAO surface to database
 - **Redox modes**: `aerobic` (pe=3.5), `anaerobic` (pe=-4), `pe_from_orp`, `fixed_pe`
-- **HFO surface complexation**: Phase-linked sites scale with Ferrihydrite amount
-- **pH adjustment**: Optional nested binary search for simultaneous pH control
-- **Iron sources**: FeCl3, FeSO4, FeCl2, Fe2(SO4)3
+- **HFO/HAO surface complexation**: Phase-linked sites scale with precipitate
+- **SI triggers**: Metastability control for slow phases (struvite default: 0.5)
+- **Sulfide sensitivity**: Mandatory for anaerobic iron without S(-2)
 
-**New output fields (v2.3):**
-- `mechanistic_partition` - Shows WHERE P and Fe went (surfaces vs solids)
-- `marginal_fe_to_p` - Incremental dFe/dP at current target (reveals diminishing returns)
-- `sulfide_assumption` - Flags sulfide-free anaerobic results as optimistic
-
-**Warning:** Anaerobic mode without S(-2) gives Fe:P ≈ 1.6 (sulfide-free limit). Real digesters have sulfide → expect Fe:P = 2.5-5+.
+**Advanced parameters:**
+- `hfo_site_multiplier`: Site density tuning (0.5-2.0, default 1.0)
+- `p_inert_soluble_mg_l`: Non-reactive P that won't precipitate
+- `allowed_phases`: Override default phases (e.g., `["CaHPO4:2H2O"]` for brushite only)
+- `include_background_sinks`: Include competing phases (struvite/Ca-P)
 
 ---
 
@@ -583,13 +612,13 @@ result = batch_process_scenarios({
 - pH↑: NaOH, Ca(OH)2, Na2CO3
 - pH↓: H2SO4, HCl, CO2
 - Softening: Ca(OH)2 → precipitates Calcite, Brucite
-- P removal: FeCl3 → precipitates Strengite, Fe(OH)3
+- P removal: FeCl3/AlCl3/MgCl2/Ca(OH)2 → use `calculate_phosphorus_removal_dose`
 - Heavy metals: NaOH → Metal(OH)n at pH 9-11
 
 **Remember**:
-1. **16 tools available** - Core analysis, dosing, optimization, and Fe-P precipitation
+1. **17 tools available** - Core analysis, dosing, optimization, P removal, diagnostics
 2. **Use batch processing** for multiple similar calculations - scenario types handle sweeps, optimization
-3. **Use `calculate_ferric_dose_for_tp`** for Fe-P precipitation with mechanistic output
+3. **Use `calculate_phosphorus_removal_dose`** for all P removal (Fe/Al/Mg/Ca strategies)
 4. **Use exact input templates** to avoid validation errors
 5. **Always wrap concentrations** in `analysis` object
 6. **Include required fields**: `units`, `database`, `temperature_celsius`
@@ -597,7 +626,8 @@ result = batch_process_scenarios({
 
 ## Server Status: ✅ **PRODUCTION READY**
 - **Server name**: `water_chemistry_mcp`
-- **16 registered tools** with MCP annotations
+- **17 registered tools** with MCP annotations
 - **PHREEQC thermodynamics only** - All results from validated calculations
-- **Fe-P precipitation** - HFO surface complexation, mechanistic partition, marginal Fe:P analysis
+- **Unified P removal** - 4 strategies (Fe/Al/Mg/Ca) with HFO/HAO surface complexation
+- **Inline PHREEQC blocks** - Auto-adds Struvite, Variscite, HAO for missing phases
 - **Multi-objective optimization** - Pareto front, weighted sum, sequential, robust strategies

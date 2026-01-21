@@ -28,7 +28,7 @@ from tools.batch_processing import (
     # Note: optimize_multi_reagent_treatment is handled via batch_process_scenarios
     # with scenario_type="multi_reagent_optimization"
 )
-from tools.ferric_phosphate import calculate_ferric_dose_for_tp
+from tools.phosphorus_removal import calculate_phosphorus_removal_dose
 
 
 class TestResults:
@@ -299,7 +299,7 @@ async def test_lime_softening_dose_calculation(results: TestResults):
 
 
 async def test_phosphorus_removal_optimization(results: TestResults):
-    """Test specialized phosphorus removal optimization using calculate_ferric_dose_for_tp"""
+    """Test specialized phosphorus removal optimization using calculate_phosphorus_removal_dose"""
     test_name = "Phosphorus removal optimization"
     start_time = asyncio.get_event_loop().time()
 
@@ -318,42 +318,31 @@ async def test_phosphorus_removal_optimization(results: TestResults):
         }
 
         target_p = 0.8  # mg/L
-        iron_source = 'FeCl3'
-        target_ph = 7.5
 
-        result = await calculate_ferric_dose_for_tp({
+        result = await calculate_phosphorus_removal_dose({
             'initial_solution': p_water,
             'target_residual_p_mg_l': target_p,
-            'iron_source': iron_source,
-            'database': 'minteq.v4.dat',
-            'ph_adjustment': {
-                'enabled': True,
-                'target_ph': target_ph,
-                'reagent': 'NaOH',
+            'strategy': {
+                'strategy': 'iron',
+                'reagent': 'FeCl3',
             },
+            'database': 'minteq.v4.dat',
         })
 
         # Validate result structure
-        assert result.get('status') == 'success', f"Expected success, got: {result.get('error', result.get('status'))}"
-        assert 'optimization_summary' in result, "Missing optimization_summary"
+        assert result.get('status') == 'success', f"Expected success, got: {result.get('error_message', result.get('status'))}"
 
-        opt = result['optimization_summary']
-
-        # Validate Fe dose
-        assert opt.get('optimal_fe_dose_mg_l') is not None, "Missing optimal_fe_dose_mg_l"
-        assert opt.get('optimal_fe_dose_mg_l') > 0, "Fe dose should be positive"
+        # Validate dose
+        assert result.get('optimal_dose_mg_l') is not None, "Missing optimal_dose_mg_l"
+        assert result.get('optimal_dose_mg_l') > 0, "Dose should be positive"
 
         # Check P removal
-        achieved_p = opt.get('achieved_p_mg_l')
+        achieved_p = result.get('achieved_p_mg_l')
         assert achieved_p is not None, "Missing achieved_p_mg_l"
         assert achieved_p < 5.0, "Phosphorus not significantly reduced"
 
-        # Check convergence
-        convergence = opt.get('convergence_achieved', False)
-
         duration = asyncio.get_event_loop().time() - start_time
-        convergence_status = "converged" if convergence else "non-converged"
-        results.record_pass(test_name, duration, f"Target {target_p} mg/L P, achieved {achieved_p:.2f} mg/L - {convergence_status}")
+        results.record_pass(test_name, duration, f"Target {target_p} mg/L P, achieved {achieved_p:.2f} mg/L")
 
     except Exception as e:
         results.record_fail(test_name, str(e))

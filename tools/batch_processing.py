@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from .chemical_addition import simulate_chemical_addition
-from .ferric_phosphate import calculate_ferric_dose_for_tp
+from .phosphorus_removal import calculate_phosphorus_removal_dose
 from .solution_speciation import calculate_solution_speciation
 
 logger = logging.getLogger(__name__)
@@ -284,22 +284,30 @@ async def process_single_scenario(base_solution: Dict[str, Any], scenario: Dict[
             return {"dose_response_results": sweep_results}
 
     elif scenario_type == "phosphorus_optimization":
-        # Advanced phosphorus removal optimization using calculate_ferric_dose_for_tp
-        target_ph = scenario.get("target_ph")
-        ph_adjustment = None
-        if target_ph is not None:
-            ph_adjustment = {
-                "enabled": True,
-                "target_ph": target_ph,
-                "reagent": "NaOH",
-            }
-        return await calculate_ferric_dose_for_tp(
+        # Advanced phosphorus removal optimization using unified tool
+        coagulant = scenario.get("coagulant", "FeCl3")
+
+        # Determine strategy from coagulant type
+        if coagulant in ("FeCl3", "FeSO4", "FeCl2", "Fe2(SO4)3"):
+            strategy = "iron"
+        elif coagulant in ("AlCl3", "Al2(SO4)3"):
+            strategy = "aluminum"
+        elif coagulant in ("MgCl2", "MgO", "Mg(OH)2"):
+            strategy = "struvite"
+        elif coagulant in ("Ca(OH)2", "CaCl2", "CaO"):
+            strategy = "calcium_phosphate"
+        else:
+            strategy = "iron"  # Default to iron
+
+        return await calculate_phosphorus_removal_dose(
             {
                 "initial_solution": base_solution,
                 "target_residual_p_mg_l": scenario["target_p_mg_l"],
-                "iron_source": scenario.get("coagulant", "FeCl3"),
+                "strategy": {
+                    "strategy": strategy,
+                    "reagent": coagulant,
+                },
                 "database": scenario.get("database", "minteq.v4.dat"),
-                "ph_adjustment": ph_adjustment,
             }
         )
 

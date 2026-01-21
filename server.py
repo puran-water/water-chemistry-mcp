@@ -50,10 +50,7 @@ from tools.chemical_addition import simulate_chemical_addition
 # NEW: Dosing requirement (phreeqpython API implementation)
 from tools.dosing_requirement import calculate_dosing_requirement
 
-# NEW: Ferric phosphate precipitation modeling
-from tools.ferric_phosphate import calculate_ferric_dose_for_tp
-
-# NEW: Unified phosphorus removal tool (supports Fe, Al, Mg, Ca strategies)
+# Unified phosphorus removal tool (supports Fe, Al, Mg, Ca strategies)
 from tools.phosphorus_removal import calculate_phosphorus_removal_dose
 
 # NEW: Engine status for diagnostics
@@ -250,16 +247,6 @@ mcp.tool(
 
 mcp.tool(
     annotations={
-        "title": "Calculate Ferric Dose for Target Phosphorus (DEPRECATED)",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    }
-)(calculate_ferric_dose_for_tp)
-
-mcp.tool(
-    annotations={
         "title": "Calculate Phosphorus Removal Dose",
         "readOnlyHint": True,
         "destructiveHint": False,
@@ -339,8 +326,8 @@ if __name__ == "__main__":
         logger.warning("PhreeqPython not available, cannot use PHREEQC databases")
 
     # Log which tools are registered
-    logger.info("=== WATER CHEMISTRY MCP SERVER v2.3 ===\n")
-    logger.info("Registered 18 tools:\n")
+    logger.info("=== WATER CHEMISTRY MCP SERVER v3.0 ===\n")
+    logger.info("Registered 17 tools:\n")
     logger.info("CORE ANALYSIS TOOLS (5):")
     logger.info("  1. calculate_solution_speciation: Water quality analysis and equilibrium speciation")
     logger.info("  2. simulate_chemical_addition: Treatment simulation with precipitation modeling")
@@ -354,15 +341,14 @@ if __name__ == "__main__":
     logger.info("  9. simulate_gas_phase_interaction: Gas-water equilibration")
     logger.info("  10. simulate_redox_adjustment: pe/Eh/couple adjustment")
     logger.info("  11. simulate_surface_interaction: Surface complexation/adsorption")
-    logger.info("\nOPTIMIZATION TOOLS (6):")
+    logger.info("\nOPTIMIZATION TOOLS (5):")
     logger.info("  12. generate_lime_softening_curve: Complete dose-response curves")
     logger.info("  13. calculate_lime_softening_dose: Optimal lime softening dose")
     logger.info("  14. calculate_dosing_requirement_enhanced: Multi-objective dosing optimization")
     logger.info("  15. optimize_multi_reagent_treatment: Multi-reagent with 4 strategies")
-    logger.info("  16. calculate_ferric_dose_for_tp: [DEPRECATED] Use calculate_phosphorus_removal_dose instead")
-    logger.info("  17. calculate_phosphorus_removal_dose: Unified P removal (Fe/Al/Mg/Ca strategies)")
+    logger.info("  16. calculate_phosphorus_removal_dose: Unified P removal (Fe/Al/Mg/Ca strategies)")
     logger.info("\nDIAGNOSTICS TOOLS (1):")
-    logger.info("  18. get_engine_status: Engine health check and database availability")
+    logger.info("  17. get_engine_status: Engine health check and database availability")
     logger.info("\n✅ FAIL LOUDLY: All errors raise typed exceptions")
     logger.info("✅ PHREEQC thermodynamics via phreeqpython API")
     logger.info("✅ Inline PHREEQC blocks for Struvite, Variscite, HAO surface")

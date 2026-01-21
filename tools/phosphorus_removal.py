@@ -219,11 +219,76 @@ class PhosphorusRemovalScenario(BaseModel):
     )
 
 
+class SulfideSensitivityScenario(BaseModel):
+    """Result for a single sulfide concentration in the sensitivity sweep."""
+
+    sulfide_mg_l: float = Field(..., description="Sulfide concentration for this scenario (mg/L as S).")
+    status: Literal["success", "infeasible", "error"] = Field(
+        ..., description="Status of this scenario simulation."
+    )
+    optimal_dose_mmol: Optional[float] = Field(
+        None, description="Optimal dose at this sulfide level (mmol/L as metal)."
+    )
+    optimal_dose_mg_l: Optional[float] = Field(
+        None, description="Optimal dose at this sulfide level (mg/L as product)."
+    )
+    achieved_p_mg_l: Optional[float] = Field(
+        None, description="Achieved residual P at this sulfide level (mg/L)."
+    )
+    metal_to_p_ratio: Optional[float] = Field(
+        None, description="Metal:P ratio at this sulfide level."
+    )
+    final_ph: Optional[float] = Field(None, description="Final pH at this sulfide level.")
+    fe_consumed_by_sulfide_pct: Optional[float] = Field(
+        None,
+        description=(
+            "Estimated percentage of Fe consumed by sulfide (FeS precipitation) "
+            "rather than P removal. Higher values indicate more Fe waste."
+        ),
+    )
+    error_message: Optional[str] = Field(None, description="Error message if simulation failed.")
+
+
 class CalculatePhosphorusRemovalDoseOutput(BaseModel):
     """Output from unified phosphorus removal dose calculation."""
 
-    status: Literal["success", "infeasible", "input_error"] = Field(..., description="Operation status.")
+    status: Literal["success", "success_with_warning", "infeasible", "input_error"] = Field(
+        ...,
+        description=(
+            "Operation status: 'success' means target was achieved within tolerance. "
+            "'success_with_warning' means a dose was found but target was not met (check target_met). "
+            "'infeasible' means target cannot be achieved. 'input_error' means invalid input."
+        ),
+    )
     error_message: Optional[str] = Field(None, description="Error message if not success.")
+
+    # Convergence tracking (NEW - Issue 3)
+    converged: Optional[bool] = Field(
+        None,
+        description=(
+            "Whether binary search converged within tolerance. False means iteration limit "
+            "was reached without meeting tolerance - result is best effort."
+        ),
+    )
+    target_met: Optional[bool] = Field(
+        None,
+        description=(
+            "Whether target P concentration was achieved (achieved_p_mg_l <= target_residual_p_mg_l + tolerance). "
+            "Check this to confirm the dose actually meets your target."
+        ),
+    )
+    residual_error_mg_l: Optional[float] = Field(
+        None,
+        description="Absolute error from target (|achieved_p - target_p|) in mg/L.",
+    )
+    iterations_used: Optional[int] = Field(
+        None,
+        description="Number of binary search iterations performed.",
+    )
+    dose_search_bounds: Optional[Dict[str, float]] = Field(
+        None,
+        description="Final search bounds {dose_low_mmol, dose_high_mmol}. Useful for debugging.",
+    )
 
     # Optimal dose
     optimal_dose_mmol: Optional[float] = Field(None, description="Optimal reagent dose (mmol/L as metal).")
@@ -243,6 +308,33 @@ class CalculatePhosphorusRemovalDoseOutput(BaseModel):
     # Precipitation breakdown
     precipitated_phases: Optional[Dict[str, float]] = Field(None, description="Precipitated phases and amounts (mmol).")
 
+    # Partitioning outputs (Issue 5/11)
+    phase_moles_mmol_per_L: Optional[Dict[str, float]] = Field(
+        None,
+        description=(
+            "Normalized phase moles (mmol/L) for mass balance. "
+            "Derived from USER_PUNCH EQUI() output on 1 kgw basis."
+        ),
+    )
+    p_removed_by_phase_mg_L: Optional[Dict[str, float]] = Field(
+        None,
+        description=(
+            "P removed by each precipitated phase (mg/L as P). "
+            "Calculated from phase moles and P stoichiometry."
+        ),
+    )
+    p_adsorbed_mg_L: Optional[float] = Field(
+        None,
+        description=(
+            "P adsorbed on HFO/HAO surface (mg/L). "
+            "Only populated for iron/aluminum strategies with surface complexation."
+        ),
+    )
+    p_dissolved_mg_L: Optional[float] = Field(
+        None,
+        description="Dissolved P remaining in solution (mg/L). Should equal achieved_p_mg_l.",
+    )
+
     # Dose-response curve (optional)
     dose_response_curve: Optional[List[PhosphorusRemovalScenario]] = Field(
         None, description="Dose-response curve data points for plotting."
@@ -251,6 +343,38 @@ class CalculatePhosphorusRemovalDoseOutput(BaseModel):
     # Redox diagnostics
     redox_diagnostics: Optional[RedoxDiagnostics] = Field(
         None, description="Detailed redox constraint and pe diagnostics."
+    )
+
+    # Sulfide sensitivity sweep results (Issue 1/9)
+    sulfide_sensitivity_results: Optional[List[SulfideSensitivityScenario]] = Field(
+        None,
+        description=(
+            "Results from sulfide sensitivity sweep at [0, 20, 50, 100] mg/L S(-2). "
+            "Only populated when sulfide_sensitivity=true for anaerobic iron strategy."
+        ),
+    )
+    design_scenario_sulfide_mg_l: Optional[float] = Field(
+        None,
+        description=(
+            "Sulfide level (mg/L) used for the primary result (optimal_dose_mmol, achieved_p_mg_l). "
+            "When sulfide_sensitivity=true, this is 50 mg/L (typical digester). "
+            "When S(-2) is explicitly provided, this is the input value."
+        ),
+    )
+    recommended_design_dose_mmol: Optional[float] = Field(
+        None,
+        description=(
+            "Conservative design dose (mmol/L) = max dose across all sweep scenarios. "
+            "Use this for design safety margin when sulfide levels are uncertain."
+        ),
+    )
+    recommended_design_dose_mg_l: Optional[float] = Field(
+        None,
+        description="Conservative design dose (mg/L as product).",
+    )
+    recommended_design_basis: Optional[str] = Field(
+        None,
+        description="Explanation of how recommended_design_dose was determined.",
     )
 
     # Warnings
@@ -414,44 +538,284 @@ def _build_redox_diagnostics(
 
     Args:
         redox: RedoxSpecification model with mode information
-        target_pe: Target pe value used for simulation
+        target_pe: Target pe value used for simulation (may be nominal for O2 equilibrium)
         achieved_pe: Actual pe from PHREEQC result
 
     Returns:
         RedoxDiagnostics model
-    """
-    # Determine constraint type from mode
-    if redox.mode == "aerobic":
-        constraint_type = "o2_equilibrium"
-        constraint_blocks = ["O2(g)"]
-    elif redox.mode == "anaerobic":
-        constraint_type = "fix_pe"
-        constraint_blocks = ["Fix_pe"]
-    elif redox.mode == "fixed_pe":
-        constraint_type = "fix_pe"
-        constraint_blocks = ["Fix_pe"]
-    elif redox.mode == "pe_from_orp":
-        constraint_type = "fix_pe"
-        constraint_blocks = ["Fix_pe"]
-    else:
-        constraint_type = "none"
-        constraint_blocks = []
 
-    # Calculate pe drift
-    pe_drift = abs(achieved_pe - target_pe) if achieved_pe is not None else None
+    Notes:
+        For aerobic mode (O2 equilibrium), target_pe is NOT a constraint - the pe is
+        determined dynamically by O2(g) equilibrium. We report achieved_pe but pe_drift
+        is not meaningful since there's no fixed target.
+
+        For anaerobic/fixed_pe/pe_from_orp modes, pe is constrained via Fix_pe pseudo-phase
+        and pe_drift shows how well the constraint was maintained.
+    """
+    # Determine constraint type, control variable, and pO2 from mode (Issue 4 fix)
+    if redox.mode == "aerobic":
+        # Aerobic: O2 equilibrium controls pe dynamically
+        # target_pe is just a nominal value, not an actual constraint
+        constraint_type = "o2_equilibrium"
+        control_variable = "pO2"  # pO2 is constrained, pe floats
+        target_pO2 = 0.21  # Atmospheric O2 partial pressure
+        constraint_blocks = ["O2(g)"]
+        # For O2 equilibrium, pe_drift is not meaningful - pe floats with O2
+        pe_drift = None
+        # Report nominal target_pe but clarify it's not a constraint
+        effective_target_pe = None  # No fixed target for O2 equilibrium
+    elif redox.mode in ("anaerobic", "fixed_pe", "pe_from_orp"):
+        # Fixed pe constraint via pseudo-phase
+        constraint_type = "fix_pe"
+        control_variable = "pe"  # pe is constrained
+        target_pO2 = None  # Not applicable
+        constraint_blocks = ["Fix_pe"]
+        effective_target_pe = target_pe
+        pe_drift = abs(achieved_pe - target_pe) if achieved_pe is not None else None
+    else:
+        # No explicit constraint (e.g., fixed_fe2_fraction experimental mode)
+        constraint_type = "none"
+        control_variable = None
+        target_pO2 = None
+        constraint_blocks = []
+        effective_target_pe = None
+        pe_drift = None
 
     # Calculate ORP equivalents (at 25°C)
-    target_orp = pe_to_orp(target_pe, 25.0)
+    # For aerobic mode, only report achieved ORP (target is not meaningful)
+    if effective_target_pe is not None:
+        target_orp = pe_to_orp(effective_target_pe, 25.0)
+    else:
+        target_orp = None
+
     achieved_orp = pe_to_orp(achieved_pe, 25.0) if achieved_pe is not None else None
 
     return RedoxDiagnostics(
         redox_constraint_type=constraint_type,
-        target_pe=target_pe,
+        redox_control_variable=control_variable,  # Issue 4 fix: clarify what's constrained
+        target_pO2_atm=target_pO2,  # Issue 4 fix: report pO2 for O2 equilibrium mode
+        target_pe=effective_target_pe,  # None for O2 equilibrium mode
         achieved_pe=achieved_pe if achieved_pe is not None else target_pe,
         pe_drift=pe_drift,
         target_orp_mV_vs_SHE=target_orp,
         achieved_orp_mV_vs_SHE=achieved_orp,
         constraint_blocks_used=constraint_blocks if constraint_blocks else None,
+    )
+
+
+# =============================================================================
+# SULFIDE SENSITIVITY SWEEP (Issue 1/9)
+# =============================================================================
+
+
+async def _run_sulfide_sensitivity_sweep(
+    input_model: "CalculatePhosphorusRemovalDoseInput",
+    reagent_info: Dict[str, Any],
+    strategy_config: Dict[str, Any],
+    database_path: str,
+    inline_phreeqc_prefix: str,
+    warnings: List[str],
+) -> Tuple[
+    List[SulfideSensitivityScenario],  # sweep results
+    Optional[float],  # primary scenario dose (50 mg/L)
+    Optional[float],  # primary scenario achieved P
+    Optional[float],  # primary scenario metal:P
+    Optional[float],  # primary scenario pH
+    Optional[Dict[str, Any]],  # primary scenario full result
+    float,  # recommended design dose (max)
+    str,  # design basis explanation
+]:
+    """
+    Run sulfide sensitivity sweep at [0, 20, 50, 100] mg/L S(-2).
+
+    For anaerobic iron dosing without explicit sulfide input, this sweep shows
+    how Fe:P ratio varies with digester sulfide levels. FeS precipitation competes
+    with P removal, so higher sulfide = higher Fe dose required.
+
+    Returns primary result from 50 mg/L scenario (typical digester) and
+    conservative design dose (max across all scenarios).
+    """
+    SULFIDE_LEVELS = [0, 20, 50, 100]  # mg/L as S
+    PRIMARY_SULFIDE_LEVEL = 50  # Use 50 mg/L as "typical digester" for primary result
+
+    results: List[SulfideSensitivityScenario] = []
+    primary_result = None
+    primary_dose = None
+    primary_achieved_p = None
+    primary_metal_p_ratio = None
+    primary_ph = None
+    max_dose = 0.0
+    max_dose_sulfide = 0.0
+
+    strategy_spec = input_model.strategy
+    reagent = strategy_spec.reagent or strategy_config["default_reagent"]
+    metal_atoms = reagent_info.get("metal_atoms", 1)
+    redox = input_model.redox or RedoxSpecification(mode="anaerobic")
+    tolerance = input_model.tolerance_mg_l
+    max_iterations = input_model.max_iterations
+    target_p_mg_l = input_model.target_residual_p_mg_l
+    p_inert = input_model.p_inert_soluble_mg_l
+    effective_target_p = target_p_mg_l - p_inert
+
+    # Calculate P to remove (in mmol) for metal:P ratio
+    base_solution = input_model.initial_solution.dict()
+    initial_p_mg_l = _get_initial_p_mg_l(base_solution)
+    p_to_remove_mg_l = initial_p_mg_l - effective_target_p
+    p_to_remove_mmol = p_to_remove_mg_l / MOLECULAR_WEIGHTS["P"]
+
+    # Resolve pe for anaerobic mode
+    pe_value = _determine_pe(redox)
+
+    # Get phases for iron strategy (anaerobic)
+    phases = list(strategy_config.get("phases_anaerobic", strategy_config.get("phases", [])))
+    # Add FeS for sulfide competition
+    if "FeS(ppt)" not in phases and "FeS" not in phases:
+        phases.append("FeS(ppt)")
+
+    for sulfide_mg_l in SULFIDE_LEVELS:
+        logger.info(f"Running sulfide sensitivity scenario: S(-2) = {sulfide_mg_l} mg/L")
+
+        try:
+            # Create modified solution with sulfide
+            modified_solution = copy.deepcopy(base_solution)
+            analysis = modified_solution.get("analysis", {})
+            analysis["S(-2)"] = sulfide_mg_l
+            modified_solution["analysis"] = analysis
+            modified_solution["pe"] = pe_value
+
+            # Binary search for this sulfide scenario
+            dose_low = 0.01
+            dose_high = strategy_spec.max_dose_mmol
+            best_dose = None
+            best_achieved_p = None
+            best_ph = None
+            best_result = None
+            converged = False
+
+            for iteration in range(max_iterations):
+                dose_mid = (dose_low + dose_high) / 2
+
+                # Use the proper simulation function
+                result = await _run_p_removal_simulation(
+                    initial_solution=copy.deepcopy(modified_solution),
+                    reagent=reagent,
+                    dose_mmol=dose_mid,
+                    phases=phases,
+                    strategy_name="iron",
+                    inline_prefix=inline_phreeqc_prefix,
+                    database_path=database_path,
+                    pe_value=pe_value,
+                    surface_name=strategy_config.get("surface_name"),
+                    hfo_site_multiplier=input_model.hfo_site_multiplier,
+                    redox_mode="anaerobic",
+                )
+
+                if "error" in result:
+                    logger.warning(f"Simulation error at sulfide={sulfide_mg_l}, dose={dose_mid}: {result['error']}")
+                    dose_high = dose_mid
+                    continue
+
+                # Extract residual P from result (already computed by _run_p_removal_simulation)
+                residual_p_mg_l = result.get("residual_p_mg_l", 0)
+                achieved_total_p = residual_p_mg_l + p_inert
+                current_error = abs(residual_p_mg_l - effective_target_p)
+
+                if current_error <= tolerance:
+                    best_dose = dose_mid
+                    best_achieved_p = achieved_total_p
+                    best_ph = result.get("ph")
+                    best_result = result
+                    converged = True
+                    break
+
+                if residual_p_mg_l > effective_target_p:
+                    dose_low = dose_mid
+                else:
+                    dose_high = dose_mid
+
+                # Track best so far
+                if best_dose is None or current_error < abs(
+                    (best_achieved_p or float("inf")) - target_p_mg_l
+                ):
+                    best_dose = dose_mid
+                    best_achieved_p = achieved_total_p
+                    best_ph = result.get("ph")
+                    best_result = result
+
+            # Calculate metal:P ratio
+            metal_p_ratio = best_dose / p_to_remove_mmol if best_dose and p_to_remove_mmol > 0 else None
+
+            # Estimate Fe consumed by sulfide (FeS precipitated vs total Fe)
+            fe_sulfide_pct = None
+            if best_result and sulfide_mg_l > 0:
+                eq_phases = best_result.get("equilibrium_phase_moles", {})
+                fes_moles = eq_phases.get("FeS(ppt)", 0) or eq_phases.get("FeS", 0)
+                if best_dose and best_dose > 0:
+                    fe_sulfide_pct = (fes_moles / best_dose) * 100
+
+            scenario = SulfideSensitivityScenario(
+                sulfide_mg_l=sulfide_mg_l,
+                status="success" if converged or best_dose else "infeasible",
+                optimal_dose_mmol=best_dose,
+                optimal_dose_mg_l=best_dose * reagent_info["mw"] / metal_atoms if best_dose else None,
+                achieved_p_mg_l=best_achieved_p,
+                metal_to_p_ratio=metal_p_ratio,
+                final_ph=best_ph,
+                fe_consumed_by_sulfide_pct=fe_sulfide_pct,
+            )
+            results.append(scenario)
+
+            # Track primary (50 mg/L) scenario
+            if sulfide_mg_l == PRIMARY_SULFIDE_LEVEL:
+                primary_dose = best_dose
+                primary_achieved_p = best_achieved_p
+                primary_metal_p_ratio = metal_p_ratio
+                primary_ph = best_ph
+                primary_result = best_result
+
+            # Track max dose for conservative design
+            if best_dose and best_dose > max_dose:
+                max_dose = best_dose
+                max_dose_sulfide = sulfide_mg_l
+
+        except Exception as e:
+            logger.error(f"Sulfide sweep error at {sulfide_mg_l} mg/L: {e}")
+            results.append(
+                SulfideSensitivityScenario(
+                    sulfide_mg_l=sulfide_mg_l,
+                    status="error",
+                    error_message=str(e),
+                )
+            )
+
+    # Build design basis explanation
+    design_basis = (
+        f"Conservative design dose from sulfide sensitivity sweep. "
+        f"Max dose {max_dose:.2f} mmol/L required at {max_dose_sulfide} mg/L S(-2). "
+        f"Use this dose if digester sulfide levels are uncertain or variable."
+    )
+
+    # Add sweep summary to warnings
+    if results:
+        sweep_summary = "Sulfide sensitivity sweep completed: "
+        sweep_summary += ", ".join(
+            [
+                f"{r.sulfide_mg_l} mg/L → {r.metal_to_p_ratio:.1f}:1 Fe:P"
+                for r in results
+                if r.metal_to_p_ratio is not None
+            ]
+        )
+        warnings.append(sweep_summary)
+
+    return (
+        results,
+        primary_dose,
+        primary_achieved_p,
+        primary_metal_p_ratio,
+        primary_ph,
+        primary_result,
+        max_dose,
+        design_basis,
     )
 
 
@@ -540,6 +904,54 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
                 reagent_used=reagent,
             ).dict(exclude_none=True)
 
+        # Issue 7: Ca competition warning for struvite
+        ca_mg_l = _get_element_mg_l(initial_solution, "Ca", ["Ca", "Calcium"])
+        if ca_mg_l is not None and ca_mg_l > 50:
+            warnings.append(
+                f"High Ca concentration ({ca_mg_l:.1f} mg/L) may compete with struvite formation. "
+                "Ca-phosphate phases (brushite, hydroxyapatite) may co-precipitate, reducing struvite yield. "
+                "Consider lowering pH or removing Ca first."
+            )
+
+        # Issue 7: NH4 limitation warning for struvite
+        # Struvite is MgNH4PO4·6H2O - 1:1:1 stoichiometry
+        # Check if NH4 is potentially limiting compared to P
+        nh4_mg_l = _get_element_mg_l(initial_solution, "N", ["N(-3)", "NH4"])
+        p_mg_l = _get_initial_p_mg_l(initial_solution)
+        if nh4_mg_l is not None and p_mg_l > 0:
+            # Convert to mmol for stoichiometric comparison
+            nh4_mmol = nh4_mg_l / MOLECULAR_WEIGHTS["N"]
+            p_mmol = p_mg_l / MOLECULAR_WEIGHTS["P"]
+            if nh4_mmol < p_mmol * 0.8:  # NH4 is < 80% of stoichiometric requirement
+                warnings.append(
+                    f"Ammonia may be limiting for struvite: N(-3) = {nh4_mg_l:.1f} mg/L ({nh4_mmol:.2f} mmol/L), "
+                    f"P = {p_mg_l:.1f} mg/L ({p_mmol:.2f} mmol/L). Struvite requires 1:1 N:P molar ratio. "
+                    "Maximum P removal may be limited by available ammonia."
+                )
+
+    # Issue 7: Alkalinity validation for calcium_phosphate strategy
+    if strategy_name == "calcium_phosphate":
+        alk_mg_caco3 = _get_alkalinity_mg_caco3(initial_solution)
+        if alk_mg_caco3 is not None and alk_mg_caco3 < 50:
+            warnings.append(
+                f"Low alkalinity ({alk_mg_caco3:.1f} mg/L as CaCO3) detected. "
+                "Ca(OH)2 dosing will significantly raise pH (to 9-11) and consume alkalinity. "
+                "Consider pH monitoring and potential re-carbonation after treatment."
+            )
+        elif alk_mg_caco3 is None:
+            warnings.append(
+                "Alkalinity not specified. Ca(OH)2 strategy requires understanding of "
+                "carbonate system for accurate pH prediction. Consider adding 'Alkalinity' to analysis."
+            )
+
+        # Check initial pH for Ca-P strategy
+        initial_ph = initial_solution.get("ph") or initial_solution.get("pH")
+        if initial_ph is not None and initial_ph < 7.0:
+            warnings.append(
+                f"Initial pH ({initial_ph}) is below optimal range for Ca-P precipitation (9-11). "
+                "Significant lime dose may be required to achieve precipitation conditions."
+            )
+
     # Mandatory sulfide sensitivity check for anaerobic iron strategy
     sulfide_sensitivity = input_model.sulfide_sensitivity
     sulfide_sensitivity_results = None
@@ -595,6 +1007,19 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
 
     # Inert P accounting: adjust effective target for non-reactive P
     p_inert = input_model.p_inert_soluble_mg_l
+
+    # Edge case validation: p_inert > initial_p makes no physical sense
+    if p_inert > initial_p_mg_l:
+        return CalculatePhosphorusRemovalDoseOutput(
+            status="input_error",
+            error_message=(
+                f"Non-reactive P ({p_inert} mg/L) exceeds initial P ({initial_p_mg_l} mg/L). "
+                "This is physically impossible. Check p_inert_soluble_mg_l value."
+            ),
+            strategy_used=strategy_name,
+            reagent_used=reagent,
+        ).dict(exclude_none=True)
+
     effective_target_p = target_p_mg_l - p_inert
     if effective_target_p < 0:
         return CalculatePhosphorusRemovalDoseOutput(
@@ -675,6 +1100,80 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
         logger.info(f"Background sinks enabled: added {background_phases}")
         warnings.append(f"Background sinks enabled: {background_phases}. " "P removal may occur via multiple pathways.")
 
+    # Step 4.6: Handle sulfide sensitivity sweep for anaerobic iron (Issue 1/9)
+    # If sulfide_sensitivity=True and no explicit S(-2), run the sweep and return results
+    if sulfide_sensitivity is True and strategy_name == "iron" and not is_aerobic:
+        logger.info("Running sulfide sensitivity sweep for anaerobic iron mode")
+
+        # Get initial P for use in sweep
+        initial_p_mg_l = _get_initial_p_mg_l(initial_solution)
+
+        (
+            sweep_results,
+            primary_dose,
+            primary_achieved_p,
+            primary_metal_p_ratio,
+            primary_ph,
+            primary_result,
+            recommended_dose,
+            design_basis,
+        ) = await _run_sulfide_sensitivity_sweep(
+            input_model=input_model,
+            reagent_info=reagent_info,
+            strategy_config=strategy_config,
+            database_path=database_path,
+            inline_phreeqc_prefix=inline_phreeqc_prefix,
+            warnings=warnings,
+        )
+
+        # Build redox diagnostics for primary result
+        achieved_pe = primary_result.get("pe") if primary_result else pe_value
+        redox_diagnostics = _build_redox_diagnostics(
+            redox=redox,
+            target_pe=pe_value,
+            achieved_pe=achieved_pe,
+        )
+
+        # Calculate mg/L doses
+        metal_atoms = reagent_info.get("metal_atoms", 1)
+        primary_dose_mg_l = primary_dose * reagent_info["mw"] / metal_atoms if primary_dose else None
+        recommended_dose_mg_l = recommended_dose * reagent_info["mw"] / metal_atoms if recommended_dose else None
+
+        # Calculate residual error and target_met for primary result (50 mg/L scenario)
+        target_met = False
+        residual_error_mg_l = None
+        if primary_achieved_p is not None:
+            residual_error_mg_l = abs(primary_achieved_p - target_p_mg_l)
+            target_met = residual_error_mg_l <= input_model.tolerance_mg_l
+
+        # Return sweep results with 50 mg/L scenario as primary result (per Issue 9)
+        return CalculatePhosphorusRemovalDoseOutput(
+            status="success",
+            converged=target_met,  # Consider it converged if primary scenario met target
+            target_met=target_met,
+            residual_error_mg_l=residual_error_mg_l,
+            iterations_used=len(sweep_results) * input_model.max_iterations,  # Approx iterations
+            dose_search_bounds=None,  # Not applicable for sweep
+            optimal_dose_mmol=primary_dose,
+            optimal_dose_mg_l=primary_dose_mg_l,
+            achieved_p_mg_l=primary_achieved_p,
+            metal_to_p_ratio=primary_metal_p_ratio,
+            final_ph=primary_ph,
+            final_pe=achieved_pe,
+            strategy_used=strategy_name,
+            reagent_used=reagent,
+            inline_blocks_added=inline_blocks_added if inline_blocks_added else None,
+            precipitated_phases=primary_result.get("precipitated_phases") if primary_result else None,
+            dose_response_curve=None,  # Not applicable for sweep
+            redox_diagnostics=redox_diagnostics,
+            sulfide_sensitivity_results=sweep_results,
+            design_scenario_sulfide_mg_l=50.0,  # Primary result is from 50 mg/L scenario
+            recommended_design_dose_mmol=recommended_dose,
+            recommended_design_dose_mg_l=recommended_dose_mg_l,
+            recommended_design_basis=design_basis,
+            warnings=warnings if warnings else None,
+        ).dict(exclude_none=True)
+
     # Step 5: Run binary search optimization
     # Use effective_target_p (accounts for inert P) in binary search
     logger.info(
@@ -691,18 +1190,26 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
     typical_ratio = strategy_config["typical_metal_p_ratio"].get("aerobic" if is_aerobic else "anaerobic", 2.0)
     initial_dose_mmol = p_to_remove_mmol * typical_ratio * 1.5  # Safety factor
 
-    # Binary search
+    # Binary search with convergence tracking (Issue 3 fix)
     dose_low = 0.0
     dose_high = min(strategy_spec.max_dose_mmol, initial_dose_mmol * 3)
     max_iterations = input_model.max_iterations
     tolerance = input_model.tolerance_mg_l
 
+    # Convergence tracking variables
     optimal_dose_mmol = None
     achieved_p_mg_l = None
     final_state = None
     dose_response_data = []
+    converged = False
+    iterations_used = 0
+    best_residual_error = float("inf")
+
+    # First, check if target is achievable at max dose (infeasibility detection)
+    max_dose_p_mg_l = None
 
     for iteration in range(max_iterations):
+        iterations_used = iteration + 1
         dose_mid = (dose_low + dose_high) / 2
 
         # Run simulation at this dose
@@ -799,10 +1306,14 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
             # Check convergence against effective_target_p (accounts for inert P)
             # Achieved total P = reactive P from simulation + inert P
             achieved_total_p_mg_l = residual_p_mg_l + p_inert
-            if abs(residual_p_mg_l - effective_target_p) <= tolerance:
+            current_error = abs(residual_p_mg_l - effective_target_p)
+
+            if current_error <= tolerance:
                 optimal_dose_mmol = dose_mid
                 achieved_p_mg_l = achieved_total_p_mg_l  # Report total P (reactive + inert)
                 final_state = result
+                converged = True
+                best_residual_error = current_error
                 logger.info(f"Converged at iteration {iteration + 1}: dose={dose_mid:.3f} mmol/L")
                 break
 
@@ -814,23 +1325,39 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
                 # Too much reagent
                 dose_high = dose_mid
 
-            # Update best solution
-            if optimal_dose_mmol is None or abs(residual_p_mg_l - effective_target_p) < abs(
-                (achieved_p_mg_l or float("inf")) - p_inert - effective_target_p
-            ):
+            # Update best solution (track best even if not converged)
+            if current_error < best_residual_error:
                 optimal_dose_mmol = dose_mid
                 achieved_p_mg_l = achieved_total_p_mg_l  # Report total P
                 final_state = result
+                best_residual_error = current_error
+
+            # Track max dose result for infeasibility detection
+            if dose_mid >= strategy_spec.max_dose_mmol * 0.95:
+                max_dose_p_mg_l = residual_p_mg_l
 
         except Exception as e:
             logger.error(f"Simulation exception at dose {dose_mid:.3f}: {e}")
             dose_high = dose_mid
 
-    # Step 6: Build output
+    # Check for infeasibility: if max dose still doesn't meet target
+    if not converged and max_dose_p_mg_l is not None:
+        if max_dose_p_mg_l > effective_target_p + tolerance:
+            warnings.append(
+                f"Target may be infeasible: at max dose ({strategy_spec.max_dose_mmol:.1f} mmol/L), "
+                f"residual P = {max_dose_p_mg_l:.2f} mg/L > target {effective_target_p:.2f} mg/L. "
+                "Consider increasing max_dose_mmol or accepting higher residual P."
+            )
+
+    # Step 6: Build output with convergence tracking (Issue 3 fix)
     if optimal_dose_mmol is None:
         return CalculatePhosphorusRemovalDoseOutput(
             status="infeasible",
             error_message="Could not find optimal dose within search range",
+            converged=False,
+            target_met=False,
+            iterations_used=iterations_used,
+            dose_search_bounds={"dose_low_mmol": dose_low, "dose_high_mmol": dose_high},
             strategy_used=strategy_name,
             reagent_used=reagent,
             warnings=warnings if warnings else None,
@@ -843,6 +1370,10 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
     # Calculate metal:P ratio
     metal_to_p_ratio = optimal_dose_mmol / p_to_remove_mmol if p_to_remove_mmol > 0 else 0
 
+    # Calculate residual error and target_met
+    residual_error_mg_l = abs(achieved_p_mg_l - target_p_mg_l) if achieved_p_mg_l is not None else None
+    target_met = residual_error_mg_l is not None and residual_error_mg_l <= tolerance
+
     # Build redox diagnostics
     achieved_pe = final_state.get("pe") if final_state else pe_value
     redox_diagnostics = _build_redox_diagnostics(
@@ -851,8 +1382,59 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
         achieved_pe=achieved_pe,
     )
 
+    # Add warning if not converged but returning best effort
+    if not converged:
+        warnings.append(
+            f"Binary search did not converge within tolerance ({tolerance} mg/L) after {iterations_used} iterations. "
+            f"Result is best effort with residual error = {residual_error_mg_l:.3f} mg/L."
+        )
+
+    # Run final simulation with partitioning extraction (Issue 5)
+    # This extracts detailed P partitioning data at the optimal dose
+    partitioning_data = {}
+    if optimal_dose_mmol is not None:
+        try:
+            final_partitioning_result = await _run_p_removal_simulation(
+                initial_solution=copy.deepcopy(initial_solution),
+                reagent=reagent,
+                dose_mmol=optimal_dose_mmol,
+                phases=phases,
+                strategy_name=strategy_name,
+                inline_prefix=inline_phreeqc_prefix,
+                database_path=database_path,
+                pe_value=pe_value,
+                surface_name=strategy_config.get("surface_name"),
+                hfo_site_multiplier=hfo_site_multiplier,
+                redox_mode=redox.mode,
+                extract_partitioning=True,
+            )
+            if "error" not in final_partitioning_result:
+                partitioning_data = {
+                    "phase_moles_mmol_per_L": final_partitioning_result.get("phase_moles_mmol_per_L"),
+                    "p_removed_by_phase_mg_L": final_partitioning_result.get("p_removed_by_phase_mg_L"),
+                    "p_adsorbed_mg_L": final_partitioning_result.get("p_adsorbed_mg_L"),
+                    "p_dissolved_mg_L": final_partitioning_result.get("p_dissolved_mg_L"),
+                }
+        except Exception as e:
+            logger.warning(f"Failed to extract partitioning data: {e}")
+
+    # Determine status based on convergence (Issue 3 fix)
+    if converged and target_met:
+        status = "success"
+    elif optimal_dose_mmol is not None and not target_met:
+        status = "success_with_warning"
+    elif optimal_dose_mmol is not None:
+        status = "success"
+    else:
+        status = "infeasible"
+
     return CalculatePhosphorusRemovalDoseOutput(
-        status="success",
+        status=status,
+        converged=converged,
+        target_met=target_met,
+        residual_error_mg_l=residual_error_mg_l,
+        iterations_used=iterations_used,
+        dose_search_bounds={"dose_low_mmol": dose_low, "dose_high_mmol": dose_high},
         optimal_dose_mmol=optimal_dose_mmol,
         optimal_dose_mg_l=optimal_dose_mg_l,
         achieved_p_mg_l=achieved_p_mg_l,
@@ -863,6 +1445,10 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
         reagent_used=reagent,
         inline_blocks_added=inline_blocks_added if inline_blocks_added else None,
         precipitated_phases=final_state.get("precipitated_phases") if final_state else None,
+        phase_moles_mmol_per_L=partitioning_data.get("phase_moles_mmol_per_L"),
+        p_removed_by_phase_mg_L=partitioning_data.get("p_removed_by_phase_mg_L"),
+        p_adsorbed_mg_L=partitioning_data.get("p_adsorbed_mg_L"),
+        p_dissolved_mg_L=partitioning_data.get("p_dissolved_mg_L"),
         dose_response_curve=dose_response_data if len(dose_response_data) >= 3 else None,
         redox_diagnostics=redox_diagnostics,
         warnings=warnings if warnings else None,
@@ -875,35 +1461,176 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
 
 
 def _get_initial_p_mg_l(solution_data: Dict[str, Any]) -> float:
-    """Extract initial P concentration from solution data."""
+    """Extract initial P concentration from solution data and convert to mg/L.
+
+    Handles unit conversion based on solution_data["units"]:
+    - "mg/L" or "mg/l": No conversion (default assumption)
+    - "mmol/L" or "mmol/l": Convert mmol/L to mg/L using P molecular weight
+
+    Args:
+        solution_data: Solution dict with "analysis" and optionally "units"
+
+    Returns:
+        P concentration in mg/L as P
+    """
     analysis = solution_data.get("analysis", {})
+    units = solution_data.get("units", "mg/L").lower()
 
     # Try different P keys
+    p_value = None
     for key in ["P", "PO4", "Orthophosphate-P"]:
         if key in analysis:
             value = analysis[key]
             if isinstance(value, (int, float)):
-                return float(value)
+                p_value = float(value)
+                break
             elif isinstance(value, str):
                 # Try to extract numeric value
                 try:
-                    return float(value.split()[0])
+                    p_value = float(value.split()[0])
+                    break
                 except (ValueError, IndexError):
                     pass
 
-    return 0.0
+    if p_value is None:
+        return 0.0
+
+    # Convert based on units (Issue 6 fix)
+    if "mmol" in units:
+        # Convert mmol/L to mg/L: mg/L = mmol/L * MW
+        p_value = mmol_to_mg_l(p_value, "P")
+        logger.debug(f"Converted P from mmol/L to {p_value:.2f} mg/L")
+
+    return p_value
+
+
+def _get_element_mg_l(solution_data: Dict[str, Any], element: str, keys: List[str]) -> Optional[float]:
+    """Extract element concentration from solution data and convert to mg/L.
+
+    Args:
+        solution_data: Solution dict with "analysis" and optionally "units"
+        element: Element symbol for MW lookup (e.g., "Ca", "S")
+        keys: List of keys to try in analysis (e.g., ["Ca", "Calcium"])
+
+    Returns:
+        Concentration in mg/L, or None if not found
+    """
+    analysis = solution_data.get("analysis", {})
+    units = solution_data.get("units", "mg/L").lower()
+
+    value = None
+    for key in keys:
+        if key in analysis:
+            raw_value = analysis[key]
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                break
+            elif isinstance(raw_value, str):
+                try:
+                    value = float(raw_value.split()[0])
+                    break
+                except (ValueError, IndexError):
+                    pass
+
+    if value is None:
+        return None
+
+    # Convert based on units
+    if "mmol" in units:
+        value = mmol_to_mg_l(value, element)
+
+    return value
+
+
+def _get_alkalinity_mg_caco3(solution_data: Dict[str, Any]) -> Optional[float]:
+    """Extract alkalinity from solution data and convert to mg/L as CaCO3.
+
+    Handles common alkalinity formats:
+    - "Alkalinity": 100 (assumes mg/L as CaCO3 if units=mg/L)
+    - "Alkalinity": "as CaCO3 100" (explicit)
+    - "C(4)": 2.0 (mmol/L, convert to CaCO3)
+
+    Args:
+        solution_data: Solution dict with "analysis" and optionally "units"
+
+    Returns:
+        Alkalinity in mg/L as CaCO3, or None if not found
+    """
+    analysis = solution_data.get("analysis", {})
+    units = solution_data.get("units", "mg/L").lower()
+
+    # Try Alkalinity key first
+    if "Alkalinity" in analysis:
+        raw_value = analysis["Alkalinity"]
+        if isinstance(raw_value, str):
+            # Handle "as CaCO3 100" format
+            if "CaCO3" in raw_value:
+                try:
+                    # Extract numeric value after "CaCO3"
+                    parts = raw_value.split()
+                    for i, part in enumerate(parts):
+                        if part == "CaCO3" and i + 1 < len(parts):
+                            return float(parts[i + 1])
+                        try:
+                            return float(part)
+                        except ValueError:
+                            continue
+                except (ValueError, IndexError):
+                    pass
+            else:
+                try:
+                    return float(raw_value.split()[0])
+                except (ValueError, IndexError):
+                    pass
+        elif isinstance(raw_value, (int, float)):
+            # Assume mg/L as CaCO3 if units=mg/L
+            if "mmol" in units:
+                # 1 mmol/L alkalinity = 50 mg/L as CaCO3 (equiv. weight)
+                return float(raw_value) * 50.0
+            return float(raw_value)
+
+    # Try C(4) (total inorganic carbon) - convert to alkalinity estimate
+    if "C(4)" in analysis:
+        raw_value = analysis["C(4)"]
+        if isinstance(raw_value, (int, float)):
+            c4_value = float(raw_value)
+            if "mmol" in units:
+                # C(4) in mmol/L, alkalinity ≈ C(4) as CaCO3 (simplified)
+                # 1 mmol/L C(4) ≈ 50 mg/L as CaCO3
+                return c4_value * 50.0
+            # If mg/L, convert from mg/L C to mg/L CaCO3
+            # mg/L CaCO3 = mg/L C * (50/12)
+            return c4_value * (50.0 / 12.0)
+
+    return None
 
 
 def _determine_pe(redox: RedoxSpecification) -> float:
-    """Determine pe value from redox specification."""
+    """Determine pe value from redox specification.
+
+    Args:
+        redox: RedoxSpecification with mode and parameters
+
+    Returns:
+        pe value for the simulation
+
+    Field mappings from RedoxSpecification:
+        - mode="aerobic" -> pe=3.5 (default for O2 equilibrium)
+        - mode="anaerobic" -> pe=-4.0 (typical digester)
+        - mode="pe_from_orp" -> convert ORP to pe using redox.orp_mv
+        - mode="fixed_pe" -> use redox.pe_value directly
+    """
     if redox.mode == "aerobic":
         return 3.5
     elif redox.mode == "anaerobic":
         return -4.0
-    elif redox.mode == "pe_from_orp" and redox.orp_mV:
-        return orp_to_pe(redox.orp_mV, 25.0, redox.orp_reference or "SHE")
-    elif redox.mode == "fixed_pe" and redox.fixed_pe is not None:
-        return redox.fixed_pe
+    elif redox.mode == "pe_from_orp" and redox.orp_mv is not None:
+        # Use orp_mv (lowercase) - correct field name from RedoxSpecification
+        temp = redox.orp_temperature_c if redox.orp_temperature_c else 25.0
+        return orp_to_pe(redox.orp_mv, temp, redox.orp_reference or "SHE")
+    elif redox.mode == "fixed_pe" and redox.pe_value is not None:
+        # Use pe_value (not fixed_pe) - correct field name from RedoxSpecification
+        return redox.pe_value
     else:
         return 4.0  # Default
 
@@ -920,6 +1647,7 @@ async def _run_p_removal_simulation(
     surface_name: Optional[str] = None,
     hfo_site_multiplier: float = 1.0,
     redox_mode: str = "aerobic",
+    extract_partitioning: bool = False,
 ) -> Dict[str, Any]:
     """Run a single P removal simulation at the specified dose.
 
@@ -935,9 +1663,11 @@ async def _run_p_removal_simulation(
         surface_name: Surface type ("Hfo" for iron, "Hao" for aluminum, None for others)
         hfo_site_multiplier: Multiplier for surface site density (default 1.0)
         redox_mode: Redox mode ("aerobic" for O2 equilibrium, "anaerobic" for Fix_pe)
+        extract_partitioning: Whether to add USER_PUNCH for P partitioning data
 
     Returns:
-        Simulation result dict with residual P, pH, precipitated phases
+        Simulation result dict with residual P, pH, precipitated phases,
+        and optionally partitioning data (phase_moles_mmol_per_L, p_adsorbed_mg_L, etc.)
     """
     from utils.helpers import (
         build_equilibrium_phases_with_pe_constraint,
@@ -945,6 +1675,7 @@ async def _run_p_removal_simulation(
         build_reaction_block,
         build_selected_output_block,
         build_solution_block,
+        build_user_punch_for_partitioning,
     )
 
     # Build PHREEQC input
@@ -973,11 +1704,15 @@ async def _run_p_removal_simulation(
     if redox_mode == "aerobic":
         # Aerobic: equilibrate with O2(g) at atmospheric partial pressure
         pe_constraint = {"method": "o2_equilibrium", "o2_si": -0.68}
-    elif redox_mode == "anaerobic":
-        # Anaerobic: Fix pe at target value (typically -4.0)
+    elif redox_mode in ("anaerobic", "fixed_pe", "pe_from_orp"):
+        # Anaerobic/fixed_pe/pe_from_orp: Fix pe at target value using pseudo-phase
+        # - anaerobic: typically pe=-4.0
+        # - fixed_pe: user-specified pe_value
+        # - pe_from_orp: pe calculated from ORP measurement
         pe_constraint = {"method": "fix_pe", "target_pe": pe_value}
     else:
         # No explicit constraint (pe determined by solution equilibrium)
+        # This includes fixed_fe2_fraction mode which is experimental
         pe_constraint = None
 
     phases_block = build_equilibrium_phases_with_pe_constraint(
@@ -1024,9 +1759,26 @@ async def _run_p_removal_simulation(
                 phreeqc_input_parts.append(surface_block)
                 logger.debug(f"Added {surface_name} surface block linked to {phase_for_surface}")
 
-    # Build selected output
-    selected_output = build_selected_output_block()
+    # Build selected output with USER_PUNCH for partitioning (Issue 5)
+    selected_output = build_selected_output_block(user_punch=extract_partitioning)
     phreeqc_input_parts.append(selected_output)
+
+    # Add USER_PUNCH block for partitioning extraction (Issue 5)
+    # This extracts phase moles, surface-adsorbed P, and dissolved P
+    if extract_partitioning:
+        # Determine which element to track based on strategy
+        reagent_info = REAGENT_DEFINITIONS.get(reagent, {})
+        metal = reagent_info.get("metal", "Fe")
+        elements_to_track = ["P", metal]
+
+        # Build USER_PUNCH block - always include phases, only surface if surface_name is set
+        user_punch = build_user_punch_for_partitioning(
+            phases=phases,
+            surface_name=surface_name if surface_name else "Hfo",  # Default to Hfo for parsing
+            elements=elements_to_track,
+            include_solution_totals=True,
+        )
+        phreeqc_input_parts.append(user_punch)
 
     # Combine input
     phreeqc_input = "\nEND\n".join(phreeqc_input_parts) + "\nEND\n"
@@ -1049,7 +1801,8 @@ async def _run_p_removal_simulation(
         # Extract final conditions
         solution_summary = result.get("solution_summary", {})
 
-        return {
+        # Base result
+        sim_result = {
             "residual_p_mg_l": residual_p_mg_l,
             "ph": solution_summary.get("pH", 7.0),
             "pe": solution_summary.get("pe", pe_value),
@@ -1057,6 +1810,157 @@ async def _run_p_removal_simulation(
             "saturation_indices": result.get("saturation_indices", {}),
         }
 
+        # Extract partitioning data if requested (Issue 5)
+        if extract_partitioning:
+            sim_result.update(
+                _extract_partitioning_data(
+                    result=result,
+                    phases=phases,
+                    surface_name=surface_name,
+                    strategy_name=strategy_name,
+                )
+            )
+
+        return sim_result
+
     except Exception as e:
         logger.error(f"PHREEQC simulation error: {e}")
         return {"error": str(e)}
+
+
+def _extract_partitioning_data(
+    result: Dict[str, Any],
+    phases: List[str],
+    surface_name: Optional[str],
+    strategy_name: str,
+) -> Dict[str, Any]:
+    """Extract P partitioning data from PHREEQC simulation result.
+
+    Parses equilibrium phase moles and USER_PUNCH output to calculate:
+    - Phase moles in mmol/L (normalized from 1 kgw basis)
+    - P removed by each phase (using stoichiometry)
+    - P adsorbed on surface (for iron/aluminum strategies)
+    - Dissolved P remaining
+
+    Args:
+        result: Raw PHREEQC simulation result dict
+        phases: List of equilibrium phase names
+        surface_name: Surface type ("Hfo", "Hao") or None
+        strategy_name: Strategy name for logging
+
+    Returns:
+        Dict with partitioning fields:
+        - phase_moles_mmol_per_L: {phase: moles}
+        - p_removed_by_phase_mg_L: {phase: mg_P}
+        - p_adsorbed_mg_L: float or None
+        - p_dissolved_mg_L: float
+    """
+    from utils.helpers import _sanitize_phase_name_for_basic
+
+    partitioning = {}
+
+    # 1. Extract phase moles (mol on 1 kgw basis → mmol/L assuming dilute solution)
+    equilibrium_moles = result.get("equilibrium_phase_moles", {})
+    phase_moles_mmol_per_L = {}
+    p_removed_by_phase_mg_L = {}
+
+    # P stoichiometry per mole of phase (most P phases are 1:1)
+    P_STOICHIOMETRY = {
+        "Strengite": 1.0,  # FePO4·2H2O
+        "Vivianite": 2.0,  # Fe3(PO4)2·8H2O → 2 P per formula unit
+        "Variscite": 1.0,  # AlPO4·2H2O
+        "Struvite": 1.0,  # MgNH4PO4·6H2O
+        "CaHPO4:2H2O": 1.0,  # Brushite
+        "Hydroxyapatite": 3.0,  # Ca5(PO4)3OH → 3 P per formula unit (but often written as 1/3)
+    }
+
+    for phase in phases:
+        # Try both original phase name and sanitized name (for USER_PUNCH output)
+        safe_phase = _sanitize_phase_name_for_basic(phase)
+        moles = equilibrium_moles.get(phase, 0.0) or equilibrium_moles.get(safe_phase, 0.0)
+        if moles and moles > 0:
+            # Convert mol to mmol (1 kgw ≈ 1 L for dilute solutions)
+            mmol = moles * 1000
+            phase_moles_mmol_per_L[phase] = mmol
+
+            # Calculate P removed by this phase using stoichiometry
+            p_stoich = P_STOICHIOMETRY.get(phase, 0.0)
+            if p_stoich > 0:
+                p_mmol_from_phase = mmol * p_stoich
+                p_mg_l_from_phase = p_mmol_from_phase * MOLECULAR_WEIGHTS["P"]
+                p_removed_by_phase_mg_L[phase] = p_mg_l_from_phase
+
+    partitioning["phase_moles_mmol_per_L"] = phase_moles_mmol_per_L if phase_moles_mmol_per_L else None
+    partitioning["p_removed_by_phase_mg_L"] = p_removed_by_phase_mg_L if p_removed_by_phase_mg_L else None
+
+    # 2. Extract surface-adsorbed P (only for iron/aluminum strategies with surfaces)
+    p_adsorbed_mg_L = None
+    if surface_name in ("Hfo", "Hao"):
+        # Try to get surface P from USER_PUNCH output or species list
+        # USER_PUNCH stores: surf_P_<surface_name>
+        user_punch_data = result.get("user_punch", {})
+
+        # Try sanitized surface name lookup
+        surf_p_key = f"surf_P_{surface_name}"
+        if surf_p_key in user_punch_data:
+            p_surf_mol = user_punch_data.get(surf_p_key, 0.0)
+            if p_surf_mol and p_surf_mol > 0:
+                p_adsorbed_mg_L = p_surf_mol * MOLECULAR_WEIGHTS["P"] * 1000
+
+        # Fallback 1: Check surface_adsorbed_moles from subprocess parser (Issue 5 fix)
+        # Subprocess parser stores: P_Hfo, P_Hao (after stripping surf_ prefix)
+        if p_adsorbed_mg_L is None:
+            surface_adsorbed = result.get("surface_adsorbed_moles", {})
+            surf_p_key_alt = f"P_{surface_name}"  # e.g., P_Hfo
+            p_surf_mol = surface_adsorbed.get(surf_p_key_alt, 0.0)
+            if p_surf_mol and p_surf_mol > 0:
+                p_adsorbed_mg_L = p_surf_mol * MOLECULAR_WEIGHTS["P"] * 1000
+
+        # Fallback 2: Sum P species on surface from species_molality/species_molalities
+        # Note: phreeqpython mode uses "species_molality", subprocess mode uses "species_molalities"
+        if p_adsorbed_mg_L is None:
+            species_molality = result.get("species_molality", {}) or result.get("species_molalities", {})
+            surface_p_moles = 0.0
+
+            # Common HFO phosphate surface species
+            hfo_p_species = [
+                "Hfo_wH2PO4",
+                "Hfo_wHPO4-",
+                "Hfo_wPO4-2",
+                "Hfo_sH2PO4",
+                "Hfo_sHPO4-",
+                "Hfo_sPO4-2",
+            ]
+            # Common HAO phosphate surface species
+            hao_p_species = [
+                "Hao_wH2PO4",
+                "Hao_wHPO4-",
+                "Hao_wPO4-2",
+                "Hao_sH2PO4",
+                "Hao_sHPO4-",
+                "Hao_sPO4-2",
+            ]
+
+            p_species_to_check = hfo_p_species if surface_name == "Hfo" else hao_p_species
+
+            for species in p_species_to_check:
+                mol = species_molality.get(species, 0.0)
+                if mol and mol > 0:
+                    surface_p_moles += mol
+
+            if surface_p_moles > 0:
+                p_adsorbed_mg_L = surface_p_moles * MOLECULAR_WEIGHTS["P"] * 1000
+
+    partitioning["p_adsorbed_mg_L"] = p_adsorbed_mg_L
+
+    # 3. Extract dissolved P (from element_totals_molality)
+    element_totals = result.get("element_totals_molality", {})
+    p_molal = element_totals.get("P", 0) or 0
+    partitioning["p_dissolved_mg_L"] = p_molal * MOLECULAR_WEIGHTS["P"] * 1000
+
+    logger.debug(
+        f"Partitioning for {strategy_name}: phases={phase_moles_mmol_per_L}, "
+        f"p_removed={p_removed_by_phase_mg_L}, adsorbed={p_adsorbed_mg_L}"
+    )
+
+    return partitioning

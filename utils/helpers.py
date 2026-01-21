@@ -930,6 +930,24 @@ def build_phase_linked_surface_block(
     return "\n".join(lines) + "\n"
 
 
+def _sanitize_phase_name_for_basic(phase: str) -> str:
+    """
+    Sanitize a phase name to be a valid PHREEQC BASIC variable name.
+
+    PHREEQC BASIC variable names must be alphanumeric (plus underscore).
+    Phase names like 'CaHPO4:2H2O', 'Fe(OH)3', 'Al2(SO4)3' need sanitization.
+
+    Args:
+        phase: Original phase name from PHREEQC database
+
+    Returns:
+        Sanitized name suitable for BASIC variable (e.g., 'CaHPO4_2H2O')
+    """
+    import re
+
+    return re.sub(r"[^a-zA-Z0-9]", "_", phase)
+
+
 def build_user_punch_for_partitioning(
     phases: List[str],
     surface_name: str = "Hfo",
@@ -964,6 +982,12 @@ def build_user_punch_for_partitioning(
 
     Example output headers:
         equi_Strengite, equi_Vivianite, surf_P_Hfo, surf_Fe_Hfo, tot_P, tot_Fe
+
+    Note:
+        Phase names with special characters (colons, parentheses, etc.) are
+        automatically sanitized for BASIC variable names. E.g., 'CaHPO4:2H2O'
+        becomes 'CaHPO4_2H2O' in variables but the original name is used in
+        EQUI() calls.
     """
     if elements is None:
         elements = ["P", "Fe"]
@@ -977,9 +1001,10 @@ def build_user_punch_for_partitioning(
 
     # Phase moles (precipitation amounts)
     for phase in phases:
-        header = f"equi_{phase}"
+        safe_phase = _sanitize_phase_name_for_basic(phase)
+        header = f"equi_{safe_phase}"
         headers.append(header)
-        punch_expressions.append(f'{line_num} equi_{phase.replace("(", "_").replace(")", "_")} = EQUI("{phase}")')
+        punch_expressions.append(f'{line_num} equi_{safe_phase} = EQUI("{phase}")')
         line_num += 10
 
     # Surface-adsorbed elements
@@ -1010,7 +1035,8 @@ def build_user_punch_for_partitioning(
     # Build PUNCH statement with all variables
     var_names = []
     for phase in phases:
-        var_names.append(f'equi_{phase.replace("(", "_").replace(")", "_")}')
+        safe_phase = _sanitize_phase_name_for_basic(phase)
+        var_names.append(f"equi_{safe_phase}")
     for elem in elements:
         var_names.append(f"surf_{elem}")
     if include_solution_totals:

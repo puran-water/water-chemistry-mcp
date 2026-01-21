@@ -7,13 +7,14 @@ This module provides MCP-compatible wrappers for specialized optimization functi
 - calculate_dosing_requirement_enhanced: Multi-objective dosing optimization
 - optimize_multi_reagent_treatment: Multi-reagent optimization with 4 strategies
 
-Note: optimize_phosphorus_removal was REMOVED in v2.2. Use calculate_ferric_dose_for_tp instead.
-See tools/ferric_phosphate.py for the modern P removal tool with:
-- Binary search optimization (more efficient than grid search)
-- HFO surface complexation modeling
-- Nested binary search for pH adjustment
-- Support for multiple Fe coagulants (FeCl3, FeSO4, Fe2(SO4)3)
-- Detailed Fe/P partitioning output
+Note: For phosphorus removal, use calculate_phosphorus_removal_dose (v3.0+).
+See tools/phosphorus_removal.py for the unified P removal tool with:
+- 4 strategies: iron, aluminum, struvite, calcium_phosphate
+- Binary search optimization with convergence tracking
+- HFO/HAO surface complexation modeling
+- Inline PHREEQC blocks for phases not in standard databases
+- Support for multiple coagulants and redox modes
+- Detailed convergence and redox diagnostics
 
 Author: Claude AI
 """

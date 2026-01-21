@@ -54,8 +54,13 @@ The unified `calculate_phosphorus_removal_dose` tool supports multiple coagulant
 Features:
 - **Inline PHREEQC blocks** for phases not in standard databases (Struvite, Variscite, HAO surface)
 - **SI triggers** for metastability control (slow-precipitation phases)
-- **Sulfide sensitivity** for anaerobic iron strategy
+- **Sulfide sensitivity sweep** for anaerobic iron (runs [0, 20, 50, 100] mg/L scenarios)
 - **HFO/HAO surface complexation** with phase-linked site scaling
+- **Convergence tracking** with `converged`, `target_met`, and `residual_error_mg_l` fields
+- **Status semantics**: `success`, `success_with_warning`, `infeasible`, `input_error`
+- **P partitioning outputs**: `phase_moles_mmol_per_L`, `p_adsorbed_mg_L`, `p_dissolved_mg_L`
+- **Redox diagnostics**: `redox_control_variable`, `target_pO2_atm` for O2 equilibrium mode
+- **Chemistry validations**: Ca competition warning for struvite, alkalinity check for Ca-P
 
 ### Advanced Capabilities
 
@@ -260,15 +265,19 @@ For Claude Desktop:
 
 ## Current Status
 
-**Server Version: 3.0**
+**Server Version: 3.1**
 
 - 17 registered MCP tools
 - Unified phosphorus removal with 4 strategies (Fe/Al/Mg/Ca)
 - Inline PHREEQC blocks for Struvite, Variscite, HAO surface
+- **NEW**: Sulfide sensitivity sweep for anaerobic iron dosing
+- **NEW**: Convergence tracking and status semantics (`success_with_warning`)
+- **NEW**: P partitioning outputs (phase moles, adsorbed P, dissolved P)
+- **NEW**: Enhanced redox diagnostics with control variable and pO2 fields
 - FAIL LOUDLY error handling with typed exceptions
 - USGS PHREEQC subprocess support
 - Multi-objective optimization with 4 strategies
-- Comprehensive test coverage (100+ tests)
+- Comprehensive test coverage (390+ tests)
 
 ## Documentation
 

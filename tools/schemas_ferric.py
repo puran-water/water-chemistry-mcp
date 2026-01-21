@@ -425,24 +425,50 @@ class RedoxDiagnostics(BaseModel):
 
     Provides transparency into how redox conditions are being modeled,
     including the constraint method used and any drift from target values.
+
+    For O2 equilibrium mode (aerobic), target_pe is None because pe is
+    determined dynamically by the O2(g) equilibrium, not fixed to a target.
     """
 
     redox_constraint_type: str = Field(
         ...,
         description=(
             "Method used to constrain pe: 'fix_pe' (pseudo-phase constraint), "
-            "'o2_equilibrium' (O2(g) equilibrium), or 'none' (no constraint)."
+            "'o2_equilibrium' (O2(g) equilibrium - pe floats), or 'none' (no constraint)."
         ),
     )
-    target_pe: float = Field(..., description="Target pe value specified for the simulation.")
+    redox_control_variable: Optional[str] = Field(
+        None,
+        description=(
+            "Variable controlling redox: 'pe' for fixed pe modes, 'pO2' for O2 equilibrium. "
+            "Clarifies what's being constrained vs what floats."
+        ),
+    )
+    target_pO2_atm: Optional[float] = Field(
+        None,
+        description=(
+            "Target partial pressure of O2 in atmospheres for aerobic mode (default 0.21 atm). "
+            "Only populated for 'o2_equilibrium' constraint type."
+        ),
+    )
+    target_pe: Optional[float] = Field(
+        None,
+        description=(
+            "Target pe value for fix_pe constraint. None for O2 equilibrium mode "
+            "(pe is determined by O2(g) equilibrium, not a fixed target)."
+        ),
+    )
     achieved_pe: float = Field(..., description="Actual pe value after equilibration from PHREEQC output.")
     pe_drift: Optional[float] = Field(
         None,
-        description="Difference between achieved and target pe. >0.5 indicates potential modeling issues.",
+        description=(
+            "Difference between achieved and target pe. Only meaningful for fix_pe constraint. "
+            "None for O2 equilibrium mode. >0.5 indicates potential modeling issues."
+        ),
     )
     target_orp_mV_vs_SHE: Optional[float] = Field(
         None,
-        description="ORP corresponding to target pe in mV vs SHE (computed from pe).",
+        description="ORP corresponding to target pe in mV vs SHE. None for O2 equilibrium mode.",
     )
     achieved_orp_mV_vs_SHE: Optional[float] = Field(
         None,
@@ -699,10 +725,14 @@ def pe_to_orp(pe: float, temperature_celsius: float = 25.0) -> float:
 # Note: These are used for dose conversions. For more precise values,
 # consider using the periodictable package in the future.
 MOLECULAR_WEIGHTS = {
-    # Elements
+    # Elements (Issue 6/10 - ensure all needed elements are present)
     "P": 30.97,  # Phosphorus
     "Fe": 55.85,  # Iron
     "Al": 26.98,  # Aluminum
+    "S": 32.06,  # Sulfur (for sulfide S(-2) conversions in anaerobic mode)
+    "Ca": 40.08,  # Calcium (for Ca competition warnings)
+    "Mg": 24.31,  # Magnesium (for struvite Mg calculations)
+    "N": 14.01,  # Nitrogen (for ammonia N(-3) calculations)
     # Iron coagulants
     "FeCl3": 162.2,  # Ferric chloride
     "FeSO4": 151.9,  # Ferrous sulfate
@@ -715,6 +745,13 @@ MOLECULAR_WEIGHTS = {
     "NaOH": 40.0,  # Sodium hydroxide
     "Ca(OH)2": 74.09,  # Calcium hydroxide (lime)
     "HCl": 36.46,  # Hydrochloric acid
+    # Magnesium reagents (for struvite strategy)
+    "MgCl2": 95.21,  # Magnesium chloride
+    "MgO": 40.30,  # Magnesium oxide
+    "Mg(OH)2": 58.32,  # Magnesium hydroxide
+    # Calcium reagents (for calcium_phosphate strategy)
+    "CaCl2": 110.98,  # Calcium chloride
+    "CaO": 56.08,  # Calcium oxide (quicklime)
 }
 
 

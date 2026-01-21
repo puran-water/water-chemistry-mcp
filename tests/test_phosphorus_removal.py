@@ -358,7 +358,8 @@ class TestPhosphorusRemovalIntegration:
             },
         })
 
-        assert result["status"] == "success"
+        # Status can be "success" (target met) or "success_with_warning" (dose found but target not exactly met)
+        assert result["status"] in ["success", "success_with_warning"], f"Unexpected status: {result['status']}"
         assert result["optimal_dose_mmol"] > 0
         assert result["achieved_p_mg_l"] <= 1.0  # Some tolerance
 
@@ -508,7 +509,12 @@ class TestBuildRedoxDiagnostics:
     """Test redox diagnostics builder."""
 
     def test_build_redox_diagnostics_aerobic(self):
-        """Test redox diagnostics for aerobic mode."""
+        """Test redox diagnostics for aerobic mode.
+
+        For aerobic mode (O2 equilibrium), target_pe is None because pe is
+        controlled dynamically by O2(g) equilibrium, not a fixed target.
+        pe_drift is also None since there's no fixed target to drift from.
+        """
         from tools.phosphorus_removal import _build_redox_diagnostics
         from tools.schemas_ferric import RedoxSpecification
 
@@ -516,10 +522,11 @@ class TestBuildRedoxDiagnostics:
         diag = _build_redox_diagnostics(redox, target_pe=3.5, achieved_pe=3.4)
 
         assert diag.redox_constraint_type == "o2_equilibrium"
-        assert diag.target_pe == 3.5
+        # For O2 equilibrium, target_pe is None (pe floats with O2)
+        assert diag.target_pe is None
         assert diag.achieved_pe == 3.4
-        assert diag.pe_drift is not None
-        assert abs(diag.pe_drift - 0.1) < 0.01
+        # pe_drift is None for O2 equilibrium (no fixed target)
+        assert diag.pe_drift is None
         assert "O2(g)" in diag.constraint_blocks_used
 
     def test_build_redox_diagnostics_anaerobic(self):
@@ -536,17 +543,37 @@ class TestBuildRedoxDiagnostics:
         assert "Fix_pe" in diag.constraint_blocks_used
 
     def test_build_redox_diagnostics_orp_calculation(self):
-        """Test ORP calculation in diagnostics."""
+        """Test ORP calculation in diagnostics.
+
+        Use fixed_pe mode since that's where target_orp_mV_vs_SHE is meaningful.
+        For aerobic mode (O2 equilibrium), target_orp_mV_vs_SHE is None.
+        """
         from tools.phosphorus_removal import _build_redox_diagnostics
         from tools.schemas_ferric import RedoxSpecification, pe_to_orp
 
-        redox = RedoxSpecification(mode="aerobic")
+        # Use fixed_pe mode where target_pe is meaningful
+        redox = RedoxSpecification(mode="fixed_pe", pe_value=4.0)
         diag = _build_redox_diagnostics(redox, target_pe=4.0, achieved_pe=4.0)
 
-        # Verify ORP calculations
+        # Verify ORP calculations for fixed_pe mode
         expected_orp = pe_to_orp(4.0, 25.0)
         assert diag.target_orp_mV_vs_SHE is not None
         assert abs(diag.target_orp_mV_vs_SHE - expected_orp) < 1.0
+        assert diag.achieved_orp_mV_vs_SHE is not None
+        assert abs(diag.achieved_orp_mV_vs_SHE - expected_orp) < 1.0
+
+    def test_build_redox_diagnostics_aerobic_no_target_orp(self):
+        """Test that aerobic mode doesn't report target ORP."""
+        from tools.phosphorus_removal import _build_redox_diagnostics
+        from tools.schemas_ferric import RedoxSpecification
+
+        redox = RedoxSpecification(mode="aerobic")
+        diag = _build_redox_diagnostics(redox, target_pe=3.5, achieved_pe=3.5)
+
+        # For O2 equilibrium, target_orp is None (pe floats with O2)
+        assert diag.target_orp_mV_vs_SHE is None
+        # But achieved_orp should be reported
+        assert diag.achieved_orp_mV_vs_SHE is not None
 
 
 # =============================================================================
@@ -877,6 +904,77 @@ class TestHfoSiteMultiplier:
             hfo_site_multiplier=5.0,  # Maximum
         )
         assert input_model.hfo_site_multiplier == 5.0
+
+
+# =============================================================================
+# SULFIDE SENSITIVITY SWEEP OUTPUT TESTS
+# =============================================================================
+
+
+class TestSulfideSensitivitySweepOutput:
+    """Test sulfide_sensitivity_results output fields."""
+
+    def test_output_schema_has_sweep_fields(self):
+        """Test output schema has sulfide sweep result fields."""
+        from tools.phosphorus_removal import CalculatePhosphorusRemovalDoseOutput
+
+        schema = CalculatePhosphorusRemovalDoseOutput.schema()
+        props = schema.get("properties", {})
+
+        # Check all sweep-related fields exist
+        assert "sulfide_sensitivity_results" in props
+        assert "design_scenario_sulfide_mg_l" in props
+        assert "recommended_design_dose_mmol" in props
+        assert "recommended_design_dose_mg_l" in props
+        assert "recommended_design_basis" in props
+
+    def test_sweep_scenario_schema(self):
+        """Test SulfideSensitivityScenario schema in phosphorus_removal."""
+        from tools.phosphorus_removal import SulfideSensitivityScenario
+
+        # Create a scenario
+        scenario = SulfideSensitivityScenario(
+            sulfide_mg_l=50.0,
+            status="success",
+            optimal_dose_mmol=10.5,
+            optimal_dose_mg_l=1702.0,
+            achieved_p_mg_l=0.48,
+            metal_to_p_ratio=2.5,
+            final_ph=6.8,
+            fe_consumed_by_sulfide_pct=25.0,
+        )
+
+        assert scenario.sulfide_mg_l == 50.0
+        assert scenario.status == "success"
+        assert scenario.metal_to_p_ratio == 2.5
+        assert scenario.fe_consumed_by_sulfide_pct == 25.0
+
+    def test_sweep_scenario_error_status(self):
+        """Test SulfideSensitivityScenario with error status."""
+        from tools.phosphorus_removal import SulfideSensitivityScenario
+
+        scenario = SulfideSensitivityScenario(
+            sulfide_mg_l=100.0,
+            status="error",
+            error_message="Simulation failed: PHREEQC error",
+        )
+
+        assert scenario.status == "error"
+        assert scenario.error_message == "Simulation failed: PHREEQC error"
+        assert scenario.optimal_dose_mmol is None
+
+    def test_sweep_scenario_infeasible_status(self):
+        """Test SulfideSensitivityScenario with infeasible status."""
+        from tools.phosphorus_removal import SulfideSensitivityScenario
+
+        scenario = SulfideSensitivityScenario(
+            sulfide_mg_l=100.0,
+            status="infeasible",
+            achieved_p_mg_l=2.5,  # Didn't meet target
+        )
+
+        assert scenario.status == "infeasible"
+        assert scenario.achieved_p_mg_l == 2.5
 
 
 if __name__ == "__main__":

@@ -596,6 +596,7 @@ def get_engine_status() -> Dict[str, Any]:
     if PHREEQPYTHON_AVAILABLE:
         try:
             import phreeqpython
+
             status["phreeqc_version"] = getattr(phreeqpython, "__version__", "unknown")
         except Exception:
             pass
@@ -621,9 +622,7 @@ def get_engine_status() -> Dict[str, Any]:
         )
 
     if status["active_engine"] == "none":
-        limitations.append(
-            "No PHREEQC engine available. Install phreeqpython or set USGS_PHREEQC_EXECUTABLE."
-        )
+        limitations.append("No PHREEQC engine available. Install phreeqpython or set USGS_PHREEQC_EXECUTABLE.")
 
     # Check for Al-P modeling limitations
     if status["database_loadability"].get("minteq.v4.dat"):

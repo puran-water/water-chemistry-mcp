@@ -323,14 +323,10 @@ def build_hao_phase_linked_surface_block(
     lines.append(f"    -equilibrate {equilibrate_solution}")
 
     # Strong sites - phase linked
-    lines.append(
-        f"    Hao_sOH  {phase_name}  equilibrium_phase  {sites_per_mole_strong}  {specific_area_m2_per_mol}"
-    )
+    lines.append(f"    Hao_sOH  {phase_name}  equilibrium_phase  {sites_per_mole_strong}  {specific_area_m2_per_mol}")
 
     # Weak sites - phase linked
-    lines.append(
-        f"    Hao_wOH  {phase_name}  equilibrium_phase  {sites_per_mole_weak}  {specific_area_m2_per_mol}"
-    )
+    lines.append(f"    Hao_wOH  {phase_name}  equilibrium_phase  {sites_per_mole_weak}  {specific_area_m2_per_mol}")
 
     if no_edl:
         lines.append("    -no_edl")

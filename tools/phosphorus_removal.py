@@ -138,9 +138,7 @@ class PhosphorusRemovalStrategy(BaseModel):
     reagent: Optional[str] = Field(
         None, description="Specific reagent formula. If not provided, uses default for strategy."
     )
-    max_dose_mmol: float = Field(
-        50.0, description="Maximum reagent dose to search (mmol/L as metal).", gt=0
-    )
+    max_dose_mmol: float = Field(50.0, description="Maximum reagent dose to search (mmol/L as metal).", gt=0)
     si_trigger: Optional[float] = Field(
         None,
         description=(
@@ -161,15 +159,11 @@ class PhosphorusRemovalStrategy(BaseModel):
 class CalculatePhosphorusRemovalDoseInput(BaseModel):
     """Input for unified phosphorus removal dose calculation."""
 
-    initial_solution: WaterAnalysisInput = Field(
-        ..., description="Starting water composition with P concentration."
-    )
+    initial_solution: WaterAnalysisInput = Field(..., description="Starting water composition with P concentration.")
     target_residual_p_mg_l: float = Field(
         ..., description="Target residual phosphorus concentration (mg/L as P).", ge=0
     )
-    strategy: PhosphorusRemovalStrategy = Field(
-        ..., description="P removal strategy and reagent specification."
-    )
+    strategy: PhosphorusRemovalStrategy = Field(..., description="P removal strategy and reagent specification.")
     redox: Optional[RedoxSpecification] = Field(
         None, description="Redox specification. Defaults to aerobic if not provided."
     )
@@ -206,9 +200,7 @@ class CalculatePhosphorusRemovalDoseInput(BaseModel):
         ge=0.1,
         le=5.0,
     )
-    database: Optional[str] = Field(
-        "minteq.v4.dat", description="PHREEQC database file."
-    )
+    database: Optional[str] = Field("minteq.v4.dat", description="PHREEQC database file.")
     # Search parameters
     max_iterations: int = Field(30, description="Maximum binary search iterations.", ge=5, le=100)
     tolerance_mg_l: float = Field(0.1, description="Convergence tolerance for P (mg/L).", gt=0)
@@ -230,24 +222,14 @@ class PhosphorusRemovalScenario(BaseModel):
 class CalculatePhosphorusRemovalDoseOutput(BaseModel):
     """Output from unified phosphorus removal dose calculation."""
 
-    status: Literal["success", "infeasible", "input_error"] = Field(
-        ..., description="Operation status."
-    )
+    status: Literal["success", "infeasible", "input_error"] = Field(..., description="Operation status.")
     error_message: Optional[str] = Field(None, description="Error message if not success.")
 
     # Optimal dose
-    optimal_dose_mmol: Optional[float] = Field(
-        None, description="Optimal reagent dose (mmol/L as metal)."
-    )
-    optimal_dose_mg_l: Optional[float] = Field(
-        None, description="Optimal reagent dose (mg/L as product)."
-    )
-    achieved_p_mg_l: Optional[float] = Field(
-        None, description="Achieved residual P at optimal dose (mg/L)."
-    )
-    metal_to_p_ratio: Optional[float] = Field(
-        None, description="Molar metal:P ratio at optimal dose."
-    )
+    optimal_dose_mmol: Optional[float] = Field(None, description="Optimal reagent dose (mmol/L as metal).")
+    optimal_dose_mg_l: Optional[float] = Field(None, description="Optimal reagent dose (mg/L as product).")
+    achieved_p_mg_l: Optional[float] = Field(None, description="Achieved residual P at optimal dose (mg/L).")
+    metal_to_p_ratio: Optional[float] = Field(None, description="Molar metal:P ratio at optimal dose.")
 
     # Final state
     final_ph: Optional[float] = Field(None, description="Final pH after treatment.")
@@ -256,14 +238,10 @@ class CalculatePhosphorusRemovalDoseOutput(BaseModel):
     # Strategy info
     strategy_used: str = Field(..., description="Strategy that was used.")
     reagent_used: str = Field(..., description="Reagent formula that was used.")
-    inline_blocks_added: Optional[List[str]] = Field(
-        None, description="Inline PHREEQC blocks that were added."
-    )
+    inline_blocks_added: Optional[List[str]] = Field(None, description="Inline PHREEQC blocks that were added.")
 
     # Precipitation breakdown
-    precipitated_phases: Optional[Dict[str, float]] = Field(
-        None, description="Precipitated phases and amounts (mmol)."
-    )
+    precipitated_phases: Optional[Dict[str, float]] = Field(None, description="Precipitated phases and amounts (mmol).")
 
     # Dose-response curve (optional)
     dose_response_curve: Optional[List[PhosphorusRemovalScenario]] = Field(
@@ -413,8 +391,7 @@ def _apply_si_trigger_to_phases(
     if phases_below_trigger and len(phases_below_trigger) == len(phases_to_check):
         # All checked phases are below trigger - precipitation unlikely
         logger.debug(
-            f"SI trigger active: {phases_below_trigger} all below trigger {si_trigger}, "
-            f"precipitation unlikely"
+            f"SI trigger active: {phases_below_trigger} all below trigger {si_trigger}, " f"precipitation unlikely"
         )
         # Add warning once
         metastability_warning = (
@@ -631,7 +608,9 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
         ).dict(exclude_none=True)
 
     if p_inert > 0:
-        logger.info(f"Adjusted for inert P: target {target_p_mg_l} - inert {p_inert} = effective {effective_target_p} mg/L")
+        logger.info(
+            f"Adjusted for inert P: target {target_p_mg_l} - inert {p_inert} = effective {effective_target_p} mg/L"
+        )
         warnings.append(
             f"Inert P accounting: {p_inert} mg/L non-reactive P assumed. "
             f"Effective reactive P target = {effective_target_p:.2f} mg/L"
@@ -694,10 +673,7 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
             inline_blocks_added.append("background_sinks")
 
         logger.info(f"Background sinks enabled: added {background_phases}")
-        warnings.append(
-            f"Background sinks enabled: {background_phases}. "
-            "P removal may occur via multiple pathways."
-        )
+        warnings.append(f"Background sinks enabled: {background_phases}. " "P removal may occur via multiple pathways.")
 
     # Step 5: Run binary search optimization
     # Use effective_target_p (accounts for inert P) in binary search
@@ -712,9 +688,7 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
 
     # Get site multiplier for surface complexation
     hfo_site_multiplier = input_model.hfo_site_multiplier
-    typical_ratio = strategy_config["typical_metal_p_ratio"].get(
-        "aerobic" if is_aerobic else "anaerobic", 2.0
-    )
+    typical_ratio = strategy_config["typical_metal_p_ratio"].get("aerobic" if is_aerobic else "anaerobic", 2.0)
     initial_dose_mmol = p_to_remove_mmol * typical_ratio * 1.5  # Safety factor
 
     # Binary search
@@ -811,14 +785,16 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
 
             # Record data point for dose-response curve
             metal_atoms = reagent_info.get("metal_atoms", 1)
-            dose_response_data.append(PhosphorusRemovalScenario(
-                dose_mmol=dose_mid,
-                dose_mg_l=dose_mid * reagent_info["mw"] / metal_atoms,
-                residual_p_mg_l=residual_p_mg_l,
-                metal_to_p_ratio=dose_mid / p_to_remove_mmol if p_to_remove_mmol > 0 else 0,
-                ph=result.get("ph", 7.0),
-                precipitation_breakdown=result.get("precipitated_phases"),
-            ))
+            dose_response_data.append(
+                PhosphorusRemovalScenario(
+                    dose_mmol=dose_mid,
+                    dose_mg_l=dose_mid * reagent_info["mw"] / metal_atoms,
+                    residual_p_mg_l=residual_p_mg_l,
+                    metal_to_p_ratio=dose_mid / p_to_remove_mmol if p_to_remove_mmol > 0 else 0,
+                    ph=result.get("ph", 7.0),
+                    precipitation_breakdown=result.get("precipitated_phases"),
+                )
+            )
 
             # Check convergence against effective_target_p (accounts for inert P)
             # Achieved total P = reactive P from simulation + inert P
@@ -839,7 +815,9 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
                 dose_high = dose_mid
 
             # Update best solution
-            if optimal_dose_mmol is None or abs(residual_p_mg_l - effective_target_p) < abs((achieved_p_mg_l or float('inf')) - p_inert - effective_target_p):
+            if optimal_dose_mmol is None or abs(residual_p_mg_l - effective_target_p) < abs(
+                (achieved_p_mg_l or float("inf")) - p_inert - effective_target_p
+            ):
                 optimal_dose_mmol = dose_mid
                 achieved_p_mg_l = achieved_total_p_mg_l  # Report total P
                 final_state = result
@@ -985,9 +963,7 @@ async def _run_p_removal_simulation(
     metal_atoms = reagent_info.get("metal_atoms", 1)
     product_mmol = dose_mmol / metal_atoms  # mmol of reagent product
 
-    reaction_block = build_reaction_block([
-        {"formula": reagent, "amount": product_mmol, "units": "mmol"}
-    ])
+    reaction_block = build_reaction_block([{"formula": reagent, "amount": product_mmol, "units": "mmol"}])
     phreeqc_input_parts.append(reaction_block)
 
     # Build equilibrium phases block with pe constraint

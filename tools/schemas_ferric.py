@@ -246,6 +246,17 @@ class CalculateFerricDoseInput(BaseModel):
         "minteq.v4.dat",
         description="PHREEQC database file. minteq.v4.dat recommended for Fe-P modeling.",
     )
+    # --- Sulfide sensitivity for anaerobic mode ---
+    sulfide_sensitivity: Optional[bool] = Field(
+        None,
+        description=(
+            "Enable sulfide sensitivity analysis for anaerobic mode. "
+            "When True and in anaerobic mode without S(-2) specified, runs multiple simulations "
+            "at [0, 20, 50, 100] mg/L S(-2) to show impact on Fe requirements. "
+            "Set to False to explicitly acknowledge sulfide-free prediction. "
+            "Required for anaerobic mode when S(-2) not in initial_solution."
+        ),
+    )
     # --- Optional tuning parameters ---
     p_inert_soluble_mg_l: float = Field(
         0.0,
@@ -365,6 +376,124 @@ class MarginalFePRatio(BaseModel):
     )
 
 
+# --- Phosphate Residual Metrics (NEW) ---
+
+
+class PhosphateResidualMetrics(BaseModel):
+    """Explicit phosphate residual metrics for clear P accounting.
+
+    Provides unambiguous metrics for phosphate residuals, distinguishing
+    between total P (from PHREEQC), reactive P (what can precipitate/adsorb),
+    inert P (user assumption), and orthophosphate speciation.
+    """
+
+    residual_p_total_mg_l_as_P: float = Field(
+        ...,
+        description=(
+            "Total dissolved phosphorus from PHREEQC TOT('P') in mg/L as P. "
+            "This is the thermodynamically calculated residual."
+        ),
+    )
+    residual_p_reactive_mg_l_as_P: float = Field(
+        ...,
+        description=(
+            "Reactive dissolved P = total_P - inert_P (mg/L as P). "
+            "This is the P that was available for precipitation/adsorption."
+        ),
+    )
+    p_inert_assumed_mg_l_as_P: float = Field(
+        ...,
+        description=(
+            "User-specified non-reactive P (mg/L as P). "
+            "Represents organic P, colloidal P, or other forms that won't precipitate."
+        ),
+    )
+    residual_orthophosphate_mg_l_as_P: Optional[float] = Field(
+        None,
+        description=(
+            "Sum of orthophosphate species (PO4-3 + HPO4-2 + H2PO4- + H3PO4) in mg/L as P. "
+            "May differ slightly from total P due to complexed species."
+        ),
+    )
+
+
+# --- Redox Diagnostics (NEW) ---
+
+
+class RedoxDiagnostics(BaseModel):
+    """Detailed redox diagnostics for thermodynamic modeling verification.
+
+    Provides transparency into how redox conditions are being modeled,
+    including the constraint method used and any drift from target values.
+    """
+
+    redox_constraint_type: str = Field(
+        ...,
+        description=(
+            "Method used to constrain pe: 'fix_pe' (pseudo-phase constraint), "
+            "'o2_equilibrium' (O2(g) equilibrium), or 'none' (no constraint)."
+        ),
+    )
+    target_pe: float = Field(..., description="Target pe value specified for the simulation.")
+    achieved_pe: float = Field(..., description="Actual pe value after equilibration from PHREEQC output.")
+    pe_drift: Optional[float] = Field(
+        None,
+        description="Difference between achieved and target pe. >0.5 indicates potential modeling issues.",
+    )
+    target_orp_mV_vs_SHE: Optional[float] = Field(
+        None,
+        description="ORP corresponding to target pe in mV vs SHE (computed from pe).",
+    )
+    achieved_orp_mV_vs_SHE: Optional[float] = Field(
+        None,
+        description="ORP corresponding to achieved pe in mV vs SHE (computed from achieved pe).",
+    )
+    constraint_blocks_used: Optional[List[str]] = Field(
+        None,
+        description="PHREEQC blocks used for pe constraint, e.g., ['Fix_pe', 'O2(g)'].",
+    )
+
+
+# --- Sulfide Sensitivity Analysis Output ---
+
+
+class SulfideSensitivityScenario(BaseModel):
+    """Result for a single sulfide concentration scenario."""
+
+    sulfide_mg_l: float = Field(..., description="Sulfide concentration for this scenario (mg/L as S).")
+    fe_dose_required_mmol: float = Field(..., description="Optimal Fe dose required (mmol/L).")
+    fe_dose_required_mg_l: float = Field(..., description="Optimal Fe dose required (mg/L as Fe).")
+    fe_to_p_ratio: float = Field(..., description="Molar Fe:P ratio at optimal dose.")
+    achieved_p_mg_l: float = Field(..., description="Achieved residual P (mg/L).")
+    fes_precipitated_mmol: Optional[float] = Field(None, description="FeS precipitated (mmol/L) at this sulfide level.")
+
+
+class SulfideSensitivityResult(BaseModel):
+    """Results from sulfide sensitivity analysis for anaerobic mode.
+
+    When sulfide_sensitivity=True and anaerobic mode is used without S(-2),
+    this contains results for multiple sulfide scenarios to show the impact
+    of sulfide competition on Fe requirements.
+    """
+
+    scenarios: List[SulfideSensitivityScenario] = Field(
+        ...,
+        description="Results for each sulfide concentration scenario.",
+    )
+    recommendation: str = Field(
+        ...,
+        description="Engineering recommendation based on sensitivity results.",
+    )
+    primary_scenario_sulfide_mg_l: float = Field(
+        ...,
+        description="Sulfide level used for the primary (main output) result.",
+    )
+    sulfide_impact_summary: str = Field(
+        ...,
+        description="Summary of how sulfide affects Fe requirements (e.g., 'Fe:P increases from 1.6 to 4.2 as sulfide increases from 0 to 100 mg/L').",
+    )
+
+
 class IronPartitioning(BaseModel):
     """Iron partitioning between phases."""
 
@@ -480,11 +609,32 @@ class CalculateFerricDoseOutput(SolutionOutput):
             "Shows incremental cost of pushing to lower P targets."
         ),
     )
+    phosphate_residual_metrics: Optional[PhosphateResidualMetrics] = Field(
+        None,
+        description=(
+            "Explicit phosphate residual metrics for unambiguous P accounting. "
+            "Distinguishes between total P, reactive P, inert P, and orthophosphate."
+        ),
+    )
+    redox_diagnostics: Optional[RedoxDiagnostics] = Field(
+        None,
+        description=(
+            "Detailed redox diagnostics showing pe constraint method, target vs achieved values, "
+            "and any drift. Use to verify thermodynamic modeling assumptions."
+        ),
+    )
     sulfide_assumption: Optional[str] = Field(
         None,
         description=(
             "Sulfide modeling assumption: 'sulfide_free_limit' (no S(-2) specified, "
             "represents optimistic lower bound) or 'with_sulfide' (FeS competition modeled)."
+        ),
+    )
+    sulfide_sensitivity_results: Optional[SulfideSensitivityResult] = Field(
+        None,
+        description=(
+            "Results from sulfide sensitivity analysis for anaerobic mode. "
+            "Present when sulfide_sensitivity=True and anaerobic mode without S(-2) specified."
         ),
     )
     precipitated_phases: Optional[Dict[str, float]] = Field(

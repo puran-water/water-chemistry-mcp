@@ -1,6 +1,16 @@
 """
 Ferric phosphate precipitation modeling tool.
 
+.. deprecated::
+    This tool is DEPRECATED. Use `calculate_phosphorus_removal_dose` instead.
+    The unified tool supports multiple strategies (iron, aluminum, struvite, calcium_phosphate)
+    and includes additional features:
+    - Redox constraints (O2(g) equilibrium, Fix_pe) in PHREEQC deck
+    - Mandatory sulfide sensitivity for anaerobic mode
+    - Inert P accounting
+    - SI trigger for metastability
+    - Background sinks (struvite/Ca-P)
+
 This tool calculates optimal ferric (or ferrous) dose to achieve a target
 residual phosphorus concentration using:
 - Thermodynamic equilibrium modeling via PHREEQC
@@ -15,6 +25,7 @@ Key features:
 - Multiple redox modes (aerobic, anaerobic, pe_from_orp, fixed_pe)
 """
 
+import copy
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -52,7 +63,11 @@ from .schemas_ferric import (
     MechanisticPartition,
     PhAdjustmentOptions,
     PhosphatePartitioning,
+    PhosphateResidualMetrics,
+    RedoxDiagnostics,
     RedoxSpecification,
+    SulfideSensitivityResult,
+    SulfideSensitivityScenario,
     SurfaceComplexationOptions,
     get_coagulant_metal,
     get_metal_atoms_per_formula,
@@ -62,6 +77,7 @@ from .schemas_ferric import (
     mg_l_to_mmol,
     mmol_to_mg_l,
     orp_to_pe,
+    pe_to_orp,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,6 +128,46 @@ async def calculate_ferric_dose_for_tp(input_data: Dict[str, Any]) -> Dict[str, 
     surface_opts = input_model.surface_complexation or DEFAULT_SURFACE
     binary_opts = input_model.binary_search or DEFAULT_BINARY_SEARCH
     ph_opts = input_model.ph_adjustment or DEFAULT_PH_ADJUSTMENT
+    sulfide_sensitivity = input_model.sulfide_sensitivity
+
+    # --- Sulfide Sensitivity Enforcement for Anaerobic Mode ---
+    # Check if anaerobic mode without S(-2) specified
+    analysis = initial_solution.get("analysis", {})
+    has_sulfide = "S(-2)" in analysis and analysis.get("S(-2)", 0) > 0
+    is_anaerobic = redox.mode == "anaerobic"
+
+    # Variables for sensitivity results (will be populated if running sensitivity analysis)
+    sulfide_sensitivity_results = None
+
+    if is_anaerobic and not has_sulfide:
+        # Anaerobic mode without sulfide specified - require explicit handling
+        if sulfide_sensitivity is None:
+            # User hasn't specified how to handle missing sulfide
+            return {
+                "error": (
+                    "Anaerobic mode requires sulfide specification for realistic Fe:P prediction. "
+                    "Typical digesters have 20-100 mg/L S(-2). Choose one:\n"
+                    "1. Add 'S(-2)' to initial_solution.analysis with measured sulfide concentration\n"
+                    "2. Set 'sulfide_sensitivity': true to run sensitivity analysis at [0, 20, 50, 100] mg/L\n"
+                    "3. Set 'sulfide_sensitivity': false to explicitly accept sulfide-free limit (Fe:P ≈ 1.5-1.7)"
+                ),
+                "status": "input_error",
+                "suggestions": [
+                    "Add S(-2) concentration from lab measurement to initial_solution.analysis",
+                    "Enable sulfide_sensitivity for range analysis",
+                    "Set sulfide_sensitivity=false to acknowledge sulfide-free optimistic estimate",
+                ],
+            }
+        elif sulfide_sensitivity is True:
+            # Run sensitivity analysis
+            logger.info("Running sulfide sensitivity analysis for anaerobic mode without S(-2)")
+            sulfide_sensitivity_results = await _run_sulfide_sensitivity_analysis(
+                base_input_data=input_data,
+                target_p_mg_l=target_p_mg_l,
+                sulfide_levels=[0.0, 20.0, 50.0, 100.0],
+            )
+            # Continue with primary (0 mg/L sulfide-free) calculation for main output
+        # If sulfide_sensitivity is False, proceed with warning (existing behavior)
 
     # Extract tuning parameters
     p_inert = input_model.p_inert_soluble_mg_l  # Non-reactive soluble P
@@ -437,6 +493,21 @@ async def calculate_ferric_dose_for_tp(input_data: Dict[str, Any]) -> Dict[str, 
     # NEW: Calculate marginal Fe:P (Phase 2)
     marginal_fe_p = _calculate_marginal_fe_p(optimization_path)
 
+    # NEW: Build phosphate residual metrics (explicit P accounting)
+    p_residual_metrics = _build_phosphate_residual_metrics(
+        state=final_state,
+        p_inert_mg_l=p_inert,
+        temperature_celsius=initial_solution.get("temperature_celsius", 25.0),
+    )
+
+    # NEW: Build redox diagnostics
+    redox_diag = _build_redox_diagnostics(
+        state=final_state,
+        pe_constraint=pe_constraint,
+        target_pe=pe_value,
+        temperature_celsius=initial_solution.get("temperature_celsius", 25.0),
+    )
+
     # Phase 4: Check for pe drift (pe_from_orp or fixed_pe modes)
     if pe_constraint and pe_constraint.get("method") == "fix_pe":
         target_pe = pe_constraint.get("target_pe", 0)
@@ -466,7 +537,10 @@ async def calculate_ferric_dose_for_tp(input_data: Dict[str, Any]) -> Dict[str, 
         iron_partitioning=fe_partitioning,
         mechanistic_partition=mechanistic_part,
         marginal_fe_to_p=marginal_fe_p,
+        phosphate_residual_metrics=p_residual_metrics,
+        redox_diagnostics=redox_diag,
         sulfide_assumption=sulfide_assumption,
+        sulfide_sensitivity_results=sulfide_sensitivity_results,
         precipitated_phases=final_state.get("equilibrium_phase_moles"),
         final_conditions=final_conditions,
         database_used=database,
@@ -1591,4 +1665,221 @@ def _calculate_marginal_fe_p(
     return MarginalFePRatio(
         value_molar=marginal_ratio,
         interpretation=interpretation,
+    )
+
+
+def _build_phosphate_residual_metrics(
+    state: Dict[str, Any],
+    p_inert_mg_l: float,
+    temperature_celsius: float = 25.0,
+) -> PhosphateResidualMetrics:
+    """Build explicit phosphate residual metrics from simulation state.
+
+    Args:
+        state: PHREEQC simulation result dictionary
+        p_inert_mg_l: User-specified non-reactive P (mg/L)
+        temperature_celsius: Temperature for unit conversions
+
+    Returns:
+        PhosphateResidualMetrics with clear P accounting
+    """
+    # Get total dissolved P from PHREEQC TOT("P")
+    p_molal = state.get("element_totals_molality", {}).get("P", 0) or 0
+    residual_p_total_mg_l = p_molal * MOLECULAR_WEIGHTS["P"] * 1000  # mol/kgw to mg/L
+
+    # Total P reported = PHREEQC residual + user-specified inert P
+    # Inert P is assumed to pass through unchanged (organic P, colloidal P)
+    reported_total_p_mg_l = residual_p_total_mg_l + p_inert_mg_l
+
+    # Reactive P = PHREEQC residual (excludes inert)
+    # This is the P that actually participated in equilibrium
+    residual_p_reactive_mg_l = residual_p_total_mg_l
+
+    # Try to calculate orthophosphate sum from species molalities
+    species_molalities = state.get("species_molalities", {})
+    ortho_p_species = ["PO4-3", "HPO4-2", "H2PO4-", "H3PO4"]
+    ortho_p_sum = 0.0
+    ortho_p_available = False
+
+    for species in ortho_p_species:
+        if species in species_molalities:
+            ortho_p_sum += species_molalities[species]
+            ortho_p_available = True
+
+    # Convert to mg/L as P
+    residual_ortho_p_mg_l = ortho_p_sum * MOLECULAR_WEIGHTS["P"] * 1000 if ortho_p_available else None
+
+    return PhosphateResidualMetrics(
+        residual_p_total_mg_l_as_P=reported_total_p_mg_l,  # Total = reactive + inert
+        residual_p_reactive_mg_l_as_P=residual_p_reactive_mg_l,  # Only PHREEQC residual
+        p_inert_assumed_mg_l_as_P=p_inert_mg_l,
+        residual_orthophosphate_mg_l_as_P=residual_ortho_p_mg_l,
+    )
+
+
+async def _run_sulfide_sensitivity_analysis(
+    base_input_data: Dict[str, Any],
+    target_p_mg_l: float,
+    sulfide_levels: List[float] = None,
+) -> SulfideSensitivityResult:
+    """Run sulfide sensitivity analysis for anaerobic mode.
+
+    Runs the ferric dose optimization at multiple sulfide concentrations
+    to show the impact of sulfide competition on Fe requirements.
+
+    Args:
+        base_input_data: Base input data (will be modified with different S(-2) values)
+        target_p_mg_l: Target P concentration (mg/L)
+        sulfide_levels: Sulfide concentrations to test (default: [0, 20, 50, 100] mg/L)
+
+    Returns:
+        SulfideSensitivityResult with scenarios and recommendation
+    """
+    if sulfide_levels is None:
+        sulfide_levels = [0.0, 20.0, 50.0, 100.0]
+
+    scenarios = []
+    logger.info(f"Running sulfide sensitivity analysis at levels: {sulfide_levels} mg/L S(-2)")
+
+    for sulfide_mg_l in sulfide_levels:
+        # Create modified input with this sulfide level
+        modified_input = copy.deepcopy(base_input_data)
+        if "initial_solution" not in modified_input:
+            continue
+        if "analysis" not in modified_input["initial_solution"]:
+            modified_input["initial_solution"]["analysis"] = {}
+
+        # Add sulfide to analysis
+        if sulfide_mg_l > 0:
+            modified_input["initial_solution"]["analysis"]["S(-2)"] = sulfide_mg_l
+        else:
+            # Remove any existing sulfide for 0 case
+            modified_input["initial_solution"]["analysis"].pop("S(-2)", None)
+
+        # Set sulfide_sensitivity to False to avoid recursion
+        modified_input["sulfide_sensitivity"] = False
+
+        try:
+            # Run the optimization for this sulfide level
+            result = await calculate_ferric_dose_for_tp(modified_input)
+
+            if result.get("status") == "success" and result.get("optimization_summary"):
+                opt_summary = result["optimization_summary"]
+                fe_dose_mmol = opt_summary.get("optimal_fe_dose_mmol", 0)
+                fe_dose_mg_l = opt_summary.get("optimal_fe_dose_mg_l", 0)
+                fe_to_p = opt_summary.get("fe_to_p_molar_ratio", 0)
+                achieved_p = opt_summary.get("achieved_residual_p_mg_l", target_p_mg_l)
+
+                # Get FeS precipitation amount if available
+                fes_mmol = None
+                precipitated = result.get("precipitated_phases", {})
+                for phase_name in ["FeS(ppt)", "Mackinawite", "FeS"]:
+                    if phase_name in precipitated:
+                        fes_mmol = precipitated[phase_name]
+                        break
+
+                scenarios.append(SulfideSensitivityScenario(
+                    sulfide_mg_l=sulfide_mg_l,
+                    fe_dose_required_mmol=fe_dose_mmol,
+                    fe_dose_required_mg_l=fe_dose_mg_l,
+                    fe_to_p_ratio=fe_to_p,
+                    achieved_p_mg_l=achieved_p,
+                    fes_precipitated_mmol=fes_mmol,
+                ))
+            else:
+                logger.warning(f"Sensitivity run failed at S(-2)={sulfide_mg_l}: {result.get('error', 'unknown')}")
+
+        except Exception as e:
+            logger.error(f"Sensitivity analysis failed at S(-2)={sulfide_mg_l}: {e}")
+
+    # Build summary and recommendation
+    if len(scenarios) >= 2:
+        min_fe_p = min(s.fe_to_p_ratio for s in scenarios)
+        max_fe_p = max(s.fe_to_p_ratio for s in scenarios)
+        min_sulfide = scenarios[0].sulfide_mg_l
+        max_sulfide = scenarios[-1].sulfide_mg_l
+
+        impact_summary = (
+            f"Fe:P ratio increases from {min_fe_p:.1f} to {max_fe_p:.1f} "
+            f"as sulfide increases from {min_sulfide:.0f} to {max_sulfide:.0f} mg/L S(-2)"
+        )
+
+        # Recommendation based on typical digester conditions
+        if max_fe_p > 3.0:
+            recommendation = (
+                f"CAUTION: Fe:P exceeds 3.0 at higher sulfide levels. "
+                f"Measure actual S(-2) concentration for accurate Fe dosing. "
+                f"Consider pre-treatment to reduce sulfide if Fe cost is prohibitive."
+            )
+        else:
+            recommendation = (
+                f"Fe:P ratio ranges {min_fe_p:.1f}-{max_fe_p:.1f}. "
+                f"Use S(-2)=50 mg/L scenario for conservative design. "
+                f"Measure actual sulfide for operational optimization."
+            )
+
+        # Primary scenario: use 50 mg/L as representative mid-range
+        primary_sulfide = 50.0 if 50.0 in sulfide_levels else sulfide_levels[len(sulfide_levels) // 2]
+    else:
+        impact_summary = "Insufficient scenarios completed for full analysis"
+        recommendation = "Unable to provide recommendation - sensitivity analysis incomplete"
+        primary_sulfide = 0.0
+
+    return SulfideSensitivityResult(
+        scenarios=scenarios,
+        recommendation=recommendation,
+        primary_scenario_sulfide_mg_l=primary_sulfide,
+        sulfide_impact_summary=impact_summary,
+    )
+
+
+def _build_redox_diagnostics(
+    state: Dict[str, Any],
+    pe_constraint: Optional[Dict[str, Any]],
+    target_pe: float,
+    temperature_celsius: float = 25.0,
+) -> RedoxDiagnostics:
+    """Build redox diagnostics from simulation state.
+
+    Args:
+        state: PHREEQC simulation result dictionary
+        pe_constraint: pe constraint specification used in simulation
+        target_pe: Target pe value that was specified
+        temperature_celsius: Temperature for ORP calculation
+
+    Returns:
+        RedoxDiagnostics with constraint info and drift analysis
+    """
+    # Get achieved pe from PHREEQC output
+    solution_summary = state.get("solution_summary", {})
+    achieved_pe = solution_summary.get("pe", target_pe)
+
+    # Determine constraint type
+    if pe_constraint:
+        constraint_method = pe_constraint.get("method", "none")
+    else:
+        constraint_method = "none"
+
+    # Calculate pe drift
+    pe_drift = abs(achieved_pe - target_pe)
+
+    # Convert pe values to ORP (mV vs SHE)
+    target_orp = pe_to_orp(target_pe, temperature_celsius)
+    achieved_orp = pe_to_orp(achieved_pe, temperature_celsius)
+
+    # Determine constraint blocks used
+    constraint_blocks = []
+    if constraint_method == "fix_pe":
+        constraint_blocks = ["Fix_pe", "O2(g)"]
+    elif constraint_method == "o2_equilibrium":
+        constraint_blocks = ["O2(g)"]
+
+    return RedoxDiagnostics(
+        redox_constraint_type=constraint_method,
+        target_pe=target_pe,
+        achieved_pe=achieved_pe,
+        pe_drift=pe_drift if pe_drift > 0.01 else None,  # Only report if significant
+        target_orp_mV_vs_SHE=target_orp,
+        achieved_orp_mV_vs_SHE=achieved_orp,
+        constraint_blocks_used=constraint_blocks if constraint_blocks else None,
     )

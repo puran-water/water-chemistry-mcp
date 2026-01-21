@@ -38,7 +38,7 @@ With significant sulfide, FeS formation makes anaerobic LESS efficient.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +163,7 @@ def get_aerobic_phases(
     include_hfo: bool = True,
     include_strengite: bool = True,
     include_calcite: bool = True,
-) -> List[Dict[str, any]]:
+) -> List[Dict[str, Any]]:
     """
     Get equilibrium phases for aerobic Fe-P precipitation.
 
@@ -230,7 +230,7 @@ def get_anaerobic_phases(
     include_calcite: bool = True,
     sulfide_present: bool = False,
     calcite_dissolution_buffering: bool = True,
-) -> List[Dict[str, any]]:
+) -> List[Dict[str, Any]]:
     """
     Get equilibrium phases for anaerobic Fe-P precipitation.
 
@@ -311,7 +311,7 @@ def get_aluminum_phases(
     database: str = "minteq.v4.dat",
     include_hao: bool = True,
     include_calcite: bool = True,
-) -> List[Dict[str, any]]:
+) -> List[Dict[str, Any]]:
     """
     Get equilibrium phases for Al-P precipitation.
 
@@ -390,7 +390,7 @@ def get_phases_for_redox_mode(
     database: str = "minteq.v4.dat",
     sulfide_mg_l: float = 0.0,
     fix_pe: bool = True,
-) -> Tuple[List[Dict[str, any]], str, Dict[str, any]]:
+) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
     """
     Get appropriate phases and pe constraint based on redox mode.
 
@@ -574,7 +574,7 @@ def get_phases_for_coagulant(
     database: str = "minteq.v4.dat",
     sulfide_mg_l: float = 0.0,
     fix_pe: bool = True,
-) -> Tuple[List[Dict[str, any]], Optional[str], str, Dict[str, any]]:
+) -> Tuple[List[Dict[str, Any]], Optional[str], str, Dict[str, Any]]:
     """
     Get appropriate phases and pe constraint based on coagulant type (Fe or Al).
 

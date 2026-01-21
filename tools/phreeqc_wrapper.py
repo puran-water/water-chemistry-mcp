@@ -553,6 +553,98 @@ from utils.helpers import (
 from utils.import_helpers import DEFAULT_DATABASE, PHREEQPYTHON_AVAILABLE, get_default_database
 
 
+def get_engine_status() -> Dict[str, Any]:
+    """
+    Get the status of the PHREEQC simulation engine and database availability.
+
+    This function reports engine readiness for diagnostic purposes:
+    - Which execution modes are available (subprocess, phreeqpython)
+    - Which databases can be loaded
+    - Known limitations of the current configuration
+
+    Returns:
+        Dictionary with engine status information:
+        - phreeqpython_available: bool - Whether PhreeqPython library is installed
+        - subprocess_mode_available: bool - Whether USGS PHREEQC executable is available
+        - active_engine: str - Which engine is currently active ("subprocess", "phreeqpython", "none")
+        - phreeqc_version: str - Version string if available
+        - database_loadability: Dict[str, bool] - Which databases can be loaded
+        - known_limitations: List[str] - List of known limitations
+    """
+    status = {
+        "phreeqpython_available": PHREEQPYTHON_AVAILABLE,
+        "subprocess_mode_available": False,
+        "active_engine": "none",
+        "phreeqc_version": None,
+        "database_loadability": {},
+        "known_limitations": [],
+    }
+
+    # Check subprocess mode availability
+    phreeqc_exe = _get_usgs_phreeqc_executable()
+    if phreeqc_exe:
+        status["subprocess_mode_available"] = True
+        status["phreeqc_executable_path"] = phreeqc_exe
+
+    # Determine active engine
+    if USE_SUBPROCESS and status["subprocess_mode_available"]:
+        status["active_engine"] = "subprocess"
+    elif PHREEQPYTHON_AVAILABLE:
+        status["active_engine"] = "phreeqpython"
+
+    # Get PhreeqPython version if available
+    if PHREEQPYTHON_AVAILABLE:
+        try:
+            import phreeqpython
+            status["phreeqc_version"] = getattr(phreeqpython, "__version__", "unknown")
+        except Exception:
+            pass
+
+    # Check common databases
+    from utils.database_management import database_manager
+
+    common_databases = ["minteq.v4.dat", "minteq.dat", "phreeqc.dat", "wateq4f.dat"]
+    for db_name in common_databases:
+        try:
+            db_path = database_manager.get_database_path(db_name)
+            status["database_loadability"][db_name] = db_path is not None and os.path.exists(db_path)
+        except Exception:
+            status["database_loadability"][db_name] = False
+
+    # Document known limitations
+    limitations = []
+
+    if not status["subprocess_mode_available"] and status["active_engine"] == "phreeqpython":
+        limitations.append(
+            "Using PhreeqPython (VIPhreeqc): Some USGS database features may not work. "
+            "Set USGS_PHREEQC_EXECUTABLE environment variable for full compatibility."
+        )
+
+    if status["active_engine"] == "none":
+        limitations.append(
+            "No PHREEQC engine available. Install phreeqpython or set USGS_PHREEQC_EXECUTABLE."
+        )
+
+    # Check for Al-P modeling limitations
+    if status["database_loadability"].get("minteq.v4.dat"):
+        limitations.append(
+            "Al-P modeling: Standard databases lack AlPO4/Variscite phases and HAO surface data. "
+            "Al coagulants require custom database extensions for accurate P removal modeling."
+        )
+
+    # Check for struvite limitations
+    if status["database_loadability"].get("minteq.v4.dat"):
+        limitations.append(
+            "Struvite (MgNH4PO4·6H2O): Not available in standard PHREEQC databases. "
+            "Requires custom PHASES block for Mg-based P recovery modeling."
+        )
+
+    status["known_limitations"] = limitations
+    status["ready"] = status["active_engine"] != "none"
+
+    return status
+
+
 def get_mineral_alternatives(mineral_name, database_path=None):
     """
     Returns a list of alternative mineral names that could be used in place of the given mineral.

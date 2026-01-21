@@ -223,21 +223,15 @@ class SulfideSensitivityScenario(BaseModel):
     """Result for a single sulfide concentration in the sensitivity sweep."""
 
     sulfide_mg_l: float = Field(..., description="Sulfide concentration for this scenario (mg/L as S).")
-    status: Literal["success", "infeasible", "error"] = Field(
-        ..., description="Status of this scenario simulation."
-    )
+    status: Literal["success", "infeasible", "error"] = Field(..., description="Status of this scenario simulation.")
     optimal_dose_mmol: Optional[float] = Field(
         None, description="Optimal dose at this sulfide level (mmol/L as metal)."
     )
     optimal_dose_mg_l: Optional[float] = Field(
         None, description="Optimal dose at this sulfide level (mg/L as product)."
     )
-    achieved_p_mg_l: Optional[float] = Field(
-        None, description="Achieved residual P at this sulfide level (mg/L)."
-    )
-    metal_to_p_ratio: Optional[float] = Field(
-        None, description="Metal:P ratio at this sulfide level."
-    )
+    achieved_p_mg_l: Optional[float] = Field(None, description="Achieved residual P at this sulfide level (mg/L).")
+    metal_to_p_ratio: Optional[float] = Field(None, description="Metal:P ratio at this sulfide level.")
     final_ph: Optional[float] = Field(None, description="Final pH at this sulfide level.")
     fe_consumed_by_sulfide_pct: Optional[float] = Field(
         None,
@@ -312,15 +306,13 @@ class CalculatePhosphorusRemovalDoseOutput(BaseModel):
     phase_moles_mmol_per_L: Optional[Dict[str, float]] = Field(
         None,
         description=(
-            "Normalized phase moles (mmol/L) for mass balance. "
-            "Derived from USER_PUNCH EQUI() output on 1 kgw basis."
+            "Normalized phase moles (mmol/L) for mass balance. " "Derived from USER_PUNCH EQUI() output on 1 kgw basis."
         ),
     )
     p_removed_by_phase_mg_L: Optional[Dict[str, float]] = Field(
         None,
         description=(
-            "P removed by each precipitated phase (mg/L as P). "
-            "Calculated from phase moles and P stoichiometry."
+            "P removed by each precipitated phase (mg/L as P). " "Calculated from phase moles and P stoichiometry."
         ),
     )
     p_adsorbed_mg_L: Optional[float] = Field(
@@ -734,9 +726,7 @@ async def _run_sulfide_sensitivity_sweep(
                     dose_high = dose_mid
 
                 # Track best so far
-                if best_dose is None or current_error < abs(
-                    (best_achieved_p or float("inf")) - target_p_mg_l
-                ):
+                if best_dose is None or current_error < abs((best_achieved_p or float("inf")) - target_p_mg_l):
                     best_dose = dose_mid
                     best_achieved_p = achieved_total_p
                     best_ph = result.get("ph")

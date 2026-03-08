@@ -2,26 +2,22 @@
 Tool for predicting mineral scaling potential in water.
 """
 
-import asyncio
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from utils.database_management import database_manager
 from utils.helpers import build_equilibrium_phases_block, build_selected_output_block, build_solution_block
-from utils.import_helpers import PHREEQPYTHON_AVAILABLE
 
-from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
+from utils.exceptions import PhreeqcError
+
+from .phreeqc import run_phreeqc_simulation
 from .schemas import PredictScalingPotentialInput, PredictScalingPotentialOutput
 
 logger = logging.getLogger(__name__)
 
-# Membrane scaling analysis has been removed as per expert review
-# (was entirely heuristics-based and not scientifically sound)
-MEMBRANE_SCALING_AVAILABLE = False
 
-
-async def predict_scaling_potential_legacy(input_data: Dict[str, Any]) -> Dict[str, Any]:
+async def predict_scaling_potential(input_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Predicts mineral scaling potential (saturation indices) and optionally calculates
     precipitation amounts by forcing equilibrium with specified minerals.
@@ -52,9 +48,6 @@ async def predict_scaling_potential_legacy(input_data: Dict[str, Any]) -> Dict[s
         phreeqc_input = solution_str
 
         # Add equilibrium phases if requested
-        equilibrium_phases_str = ""
-        use_equilibrium = False
-
         if input_model.force_equilibrium_minerals:
             # Get compatible minerals for the selected database
             mineral_mapping = database_manager.get_compatible_minerals(
@@ -75,13 +68,12 @@ async def predict_scaling_potential_legacy(input_data: Dict[str, Any]) -> Dict[s
             # Build equilibrium phases block with compatible minerals
             if compatible_minerals:
                 phases_to_force = [{"name": name} for name in compatible_minerals]
-                # Use allow_empty=True since having no compatible minerals is acceptable
                 equilibrium_phases_str = build_equilibrium_phases_block(phases_to_force, block_num=1, allow_empty=True)
                 if equilibrium_phases_str:
                     phreeqc_input += equilibrium_phases_str
-                    phreeqc_input += "USE solution 1\n"  # Need to explicitly use initial solution
+                    phreeqc_input += "USE solution 1\n"
                     phreeqc_input += "USE equilibrium_phases 1\n"
-                    use_equilibrium = True
+                    phreeqc_input += "SAVE solution 2\n"
 
         # Add selected output
         phreeqc_input += (
@@ -109,24 +101,3 @@ async def predict_scaling_potential_legacy(input_data: Dict[str, Any]) -> Dict[s
     except Exception as e:
         logger.exception("Unexpected error in predict_scaling_potential")
         return {"error": f"Unexpected server error: {e}"}
-
-
-async def predict_scaling_potential(input_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Main scaling potential prediction function.
-    Performs standard mineral scaling analysis using PHREEQC saturation indices.
-    """
-    # Check if membrane system parameters are provided
-    if any(key in input_data for key in ["target_recovery", "recovery_rate", "concentration_factor"]):
-        logger.warning("Membrane scaling analysis has been removed due to scientific integrity concerns")
-        # Add warning to standard output
-        result = await predict_scaling_potential_legacy(input_data)
-        if "warnings" not in result:
-            result["warnings"] = []
-        result["warnings"].append(
-            "Membrane scaling analysis removed. Use standard scaling analysis for feed water only."
-        )
-        return result
-    else:
-        # Standard scaling analysis
-        return await predict_scaling_potential_legacy(input_data)

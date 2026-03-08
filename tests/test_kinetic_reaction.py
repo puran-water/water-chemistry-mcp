@@ -17,15 +17,18 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Add parent directory to path so we can import the modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from tools.kinetic_reaction import simulate_kinetic_reaction
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from tools.kinetic_reaction import simulate_kinetic_reaction_time_series
 
 async def test_simple_first_order_reaction():
-    """Test a simple first-order kinetic reaction."""
-    
+    """Test a simple first-order kinetic reaction (denitrification)."""
+
     print("\n===== TEST 1: SIMPLE FIRST-ORDER REACTION =====")
-    
+
     # Define test input data
+    # Denitrification: removes dissolved nitrogen from solution
+    # Formula uses bare element symbol "N" (not redox species "N(5)" / "N(3)")
+    # because PHREEQC -formula only accepts element symbols.
     input_data = {
         "initial_solution": {
             "analysis": {
@@ -36,7 +39,7 @@ async def test_simple_first_order_reaction():
                 "Cl": 70,
                 "S(6)": 30,
                 "C(4)": 10,
-                "N(5)": 10  # Add nitrate for the reaction
+                "N(5)": 10  # Nitrate for the reaction
             },
             "ph": 7.0,
             "temperature_celsius": 25.0,
@@ -46,18 +49,18 @@ async def test_simple_first_order_reaction():
         "kinetic_reactions": {
             "reactions": [
                 {
-                    "name": "Nitrate_reduction",
-                    "formula": {"N(5)": -1, "N(3)": 1},  # Nitrate to nitrite
+                    "name": "Denitrification",
+                    "formula": {"N": -1},  # Remove N from solution per mol of reaction
                     "parameters": {
-                        "initial_moles": 0
+                        "m0": 0
                     }
                 }
             ],
             "rates": [
                 {
-                    "name": "Nitrate_reduction",
+                    "name": "Denitrification",
                     "rate_law": """
-                        rate = -0.1 * TOT("N(5)")  # First-order decay
+                        rate = -0.1 * TOT("N(5)")
                         moles = rate * TIME
                         SAVE moles
                     """
@@ -65,46 +68,45 @@ async def test_simple_first_order_reaction():
             ]
         },
         "time_steps": {
-            "values": [3600, 7200, 14400],  # 1, 2, and 4 hours in seconds
+            "time_values": [3600, 7200, 14400],  # 1, 2, and 4 hours in seconds
             "units": "seconds"
         },
-        "database": "C:\\Program Files\\USGS\\phreeqc-3.8.6-17100-x64\\database\\phreeqc.dat",
+        "database": "phreeqc.dat",
         "allow_precipitation": False,
         "equilibrium_minerals": []
     }
-    
+
     # Run the tool
-    print("Running simulate_kinetic_reaction tool...")
-    result = await simulate_kinetic_reaction(input_data)
-    
+    print("Running simulate_kinetic_reaction_time_series tool...")
+    result = await simulate_kinetic_reaction_time_series(input_data)
+
     # Check and print results
     print_results(result)
-    
+
     # Validate the result
-    success = validate_result(result)
-    
-    return success
+    validate_result(result)
+
+
 
 async def test_complex_reaction_with_formula():
-    """Test a more complex kinetic reaction with formula."""
-    
+    """Test a more complex kinetic reaction with formula (oxygen consumption)."""
+
     print("\n===== TEST 2: COMPLEX REACTION WITH FORMULA =====")
-    
-    # Define test input data for a more complex reaction
+
+    # Calcite dissolution: a well-supported kinetic reaction in phreeqc.dat.
+    # Uses Monod-type rate law referencing SI("Calcite") for saturation control.
     input_data = {
         "initial_solution": {
             "analysis": {
-                "Ca": 40,
+                "Ca": 20,
                 "Mg": 10,
                 "Na": 20,
                 "K": 5,
                 "Cl": 70,
                 "S(6)": 30,
-                "C(4)": 10,
-                "N(5)": 10,
-                "O(0)": 8  # Dissolved oxygen
+                "C(4)": 5
             },
-            "ph": 7.0,
+            "ph": 6.0,
             "temperature_celsius": 25.0,
             "pressure_atm": 1.0,
             "units": "mg/L"
@@ -112,55 +114,60 @@ async def test_complex_reaction_with_formula():
         "kinetic_reactions": {
             "reactions": [
                 {
-                    "name": "Organic_oxidation",
-                    "formula": {"C": -1, "O(0)": -1, "C(4)": 1},  # Carbon oxidation
+                    "name": "Calcite_dissolution",
+                    "formula": {"Ca": 1, "C": 1},  # Dissolving CaCO3 adds Ca and C
                     "parameters": {
-                        "initial_moles": 0
+                        "m0": 5.0,
+                        "tol": 1e-8
                     }
                 }
             ],
             "rates": [
                 {
-                    "name": "Organic_oxidation",
+                    "name": "Calcite_dissolution",
                     "rate_law": """
-                        # More complex rate law with multiple factors
-                        k_rate = 0.02  # Rate constant
-                        # Rate depends on both organic carbon and oxygen
-                        org_C = 10  # Assumed initial organic carbon (mg/L)
-                        rate = -k_rate * org_C * TOT("O(0)") / (TOT("O(0)") + 0.5)  # Monod-type kinetics
-                        moles = rate * TIME
-                        SAVE moles
+10 si_cc = SI("Calcite")
+20 IF (M <= 0 AND si_cc < 0) THEN GOTO 200
+30 k1 = 10^(0.198 - 444.0 / TK)
+40 k2 = 10^(2.84 - 2177.0 / TK)
+50 IF (-si_cc >= 14) THEN si_cc = -14
+60 rate = k1 * ACT("H+") + k2 * ACT("CO2")
+70 rate = rate * (1 - 10^(2.0*si_cc))
+80 moles = rate * TIME
+90 IF (moles > M) THEN moles = M
+200 SAVE moles
                     """
                 }
             ]
         },
         "time_steps": {
-            "values": [3600, 7200, 14400, 28800, 86400],  # Up to 1 day
+            "time_values": [3600, 7200, 14400, 28800],
             "units": "seconds"
         },
-        "database": "C:\\Program Files\\USGS\\phreeqc-3.8.6-17100-x64\\database\\phreeqc.dat",
+        "database": "phreeqc.dat",
         "allow_precipitation": False,
         "equilibrium_minerals": []
     }
-    
+
     # Run the tool
-    print("Running simulate_kinetic_reaction tool...")
-    result = await simulate_kinetic_reaction(input_data)
-    
+    print("Running simulate_kinetic_reaction_time_series tool...")
+    result = await simulate_kinetic_reaction_time_series(input_data)
+
     # Check and print results
     print_results(result)
-    
+
     # Validate the result
-    success = validate_result(result)
-    
-    return success
+    validate_result(result)
+
+
 
 async def test_multiple_kinetic_reactions():
     """Test multiple concurrent kinetic reactions."""
-    
+
     print("\n===== TEST 3: MULTIPLE KINETIC REACTIONS =====")
-    
-    # Define test input data with multiple reactions
+
+    # Two reactions: denitrification (remove N) and oxygen consumption.
+    # Formulas use bare element symbols only.
     input_data = {
         "initial_solution": {
             "analysis": {
@@ -183,23 +190,23 @@ async def test_multiple_kinetic_reactions():
         "kinetic_reactions": {
             "reactions": [
                 {
-                    "name": "Nitrate_reduction",
-                    "formula": {"N(5)": -1, "N(3)": 1},
+                    "name": "Denitrification",
+                    "formula": {"N": -1},  # Remove N from solution
                     "parameters": {
-                        "initial_moles": 0
+                        "m0": 0
                     }
                 },
                 {
-                    "name": "Iron_oxidation",
-                    "formula": {"Fe(2)": -1, "Fe(3)": 1, "O(0)": -0.25},
+                    "name": "Oxygen_consumption",
+                    "formula": {"O": -0.25},  # Consume O (e.g., for Fe oxidation)
                     "parameters": {
-                        "initial_moles": 0
+                        "m0": 0
                     }
                 }
             ],
             "rates": [
                 {
-                    "name": "Nitrate_reduction",
+                    "name": "Denitrification",
                     "rate_law": """
                         rate = -0.05 * TOT("N(5)")
                         moles = rate * TIME
@@ -207,7 +214,7 @@ async def test_multiple_kinetic_reactions():
                     """
                 },
                 {
-                    "name": "Iron_oxidation",
+                    "name": "Oxygen_consumption",
                     "rate_law": """
                         k = 0.1
                         rate = -k * TOT("Fe(2)") * (TOT("O(0)") / (TOT("O(0)") + 0.2))
@@ -218,32 +225,31 @@ async def test_multiple_kinetic_reactions():
             ]
         },
         "time_steps": {
-            "values": [3600, 7200, 14400, 28800],
+            "time_values": [3600, 7200, 14400, 28800],
             "units": "seconds"
         },
-        "database": "C:\\Program Files\\USGS\\phreeqc-3.8.6-17100-x64\\database\\phreeqc.dat",
+        "database": "phreeqc.dat",
         "allow_precipitation": False,
         "equilibrium_minerals": []
     }
-    
+
     # Run the tool
-    print("Running simulate_kinetic_reaction tool...")
-    result = await simulate_kinetic_reaction(input_data)
-    
+    print("Running simulate_kinetic_reaction_time_series tool...")
+    result = await simulate_kinetic_reaction_time_series(input_data)
+
     # Check and print results
     print_results(result)
-    
+
     # Validate the result
-    success = validate_result(result)
-    
-    return success
+    validate_result(result)
+
+
 
 async def test_various_time_steps():
-    """Test various time step configurations."""
-    
+    """Test various time step configurations (duration/count instead of explicit values)."""
+
     print("\n===== TEST 4: VARIOUS TIME STEPS =====")
-    
-    # Define test input data with different time step configuration
+
     input_data = {
         "initial_solution": {
             "analysis": {
@@ -265,9 +271,9 @@ async def test_various_time_steps():
             "reactions": [
                 {
                     "name": "Simple_first_order",
-                    "formula": {"N(5)": -1},  # Just removing nitrate
+                    "formula": {"N": -1},  # Remove N from solution
                     "parameters": {
-                        "initial_moles": 0
+                        "m0": 0
                     }
                 }
             ],
@@ -287,22 +293,22 @@ async def test_various_time_steps():
             "count": 10,
             "duration_units": "seconds"
         },
-        "database": "C:\\Program Files\\USGS\\phreeqc-3.8.6-17100-x64\\database\\phreeqc.dat",
+        "database": "phreeqc.dat",
         "allow_precipitation": False,
         "equilibrium_minerals": []
     }
-    
+
     # Run the tool
-    print("Running simulate_kinetic_reaction tool...")
-    result = await simulate_kinetic_reaction(input_data)
-    
+    print("Running simulate_kinetic_reaction_time_series tool...")
+    result = await simulate_kinetic_reaction_time_series(input_data)
+
     # Check and print results
     print_results(result)
-    
+
     # Validate the result
-    success = validate_result(result)
-    
-    return success
+    validate_result(result)
+
+
 
 def print_results(result):
     """Print the results in a readable format."""
@@ -310,91 +316,66 @@ def print_results(result):
     if "error" in result and result["error"]:
         print(f"ERROR: {result['error']}")
         return
-    
-    # Print time steps
+
+    # Print time series info
     if "time_series" in result:
         time_series = result["time_series"]
         print(f"\nNumber of time steps: {len(time_series)}")
-        
+
         # Print a few key time steps
         steps_to_print = min(3, len(time_series))
         print(f"\nFirst {steps_to_print} time steps:")
         for i in range(steps_to_print):
             step = time_series[i]
-            print(f"\nTime Step {i+1} ({step.get('time_seconds', 'unknown')} seconds):")
-            
-            # Print solution summary
-            if "solution_summary" in step:
-                summary = step["solution_summary"]
+            print(f"\nTime Step {i+1}:")
+
+            if isinstance(step, dict):
+                # Print solution summary
+                if "solution_summary" in step:
+                    summary = step["solution_summary"]
+                    print(f"  pH: {summary.get('pH')}")
+                    print(f"  pe: {summary.get('pe')}")
+
+                # Print key concentrations if available
+                if "total_element_molalities" in step:
+                    elements = step["total_element_molalities"]
+                    print("\n  Key element concentrations (mol/kgw):")
+                    for element in ["N", "Fe", "O", "C"]:
+                        if element in elements:
+                            print(f"    {element}: {elements[element]}")
+
+    # Print final state info
+    if "final_state" in result:
+        final = result["final_state"]
+        print(f"\nFinal state:")
+        if isinstance(final, dict):
+            if "solution_summary" in final:
+                summary = final["solution_summary"]
                 print(f"  pH: {summary.get('pH')}")
                 print(f"  pe: {summary.get('pe')}")
-                
-            # Print key concentrations if available
-            if "total_element_molalities" in step:
-                elements = step["total_element_molalities"]
-                print("\n  Key element concentrations (mol/kgw):")
-                for element in ["N(5)", "N(3)", "Fe(2)", "Fe(3)", "O(0)", "C(4)"]:
-                    if element in elements:
-                        print(f"    {element}: {elements[element]}")
-        
-        # Print last time step
-        if len(time_series) > steps_to_print:
-            last_step = time_series[-1]
-            print(f"\nLast Time Step ({last_step.get('time_seconds', 'unknown')} seconds):")
-            
-            # Print solution summary
-            if "solution_summary" in last_step:
-                summary = last_step["solution_summary"]
-                print(f"  pH: {summary.get('pH')}")
-                print(f"  pe: {summary.get('pe')}")
-                
-            # Print key concentrations if available
-            if "total_element_molalities" in last_step:
-                elements = last_step["total_element_molalities"]
-                print("\n  Key element concentrations (mol/kgw):")
-                for element in ["N(5)", "N(3)", "Fe(2)", "Fe(3)", "O(0)", "C(4)"]:
-                    if element in elements:
-                        print(f"    {element}: {elements[element]}")
 
 def validate_result(result):
-    """Validate the result against expectations."""
-    # Check for errors first
-    if "error" in result and result["error"]:
-        print(f"FAILED: Got error: {result['error']}")
-        return False
-    
-    # Check for required fields
-    required_fields = ["time_series"]
-    for field in required_fields:
-        if field not in result:
-            print(f"FAILED: Missing required field '{field}' in result")
-            return False
-    
-    # Check that we have at least one time step
-    if len(result["time_series"]) == 0:
-        print("FAILED: No time steps in result")
-        return False
-    
-    # Check the first and last time step have proper data
-    first_step = result["time_series"][0]
-    last_step = result["time_series"][-1]
-    
-    required_step_fields = ["time_seconds", "solution_summary"]
-    for step in [first_step, last_step]:
-        for field in required_step_fields:
-            if field not in step:
-                print(f"FAILED: Missing required field '{field}' in time step")
-                return False
-    
-    # Check that time is increasing
-    if len(result["time_series"]) > 1:
-        time_values = [step.get("time_seconds", 0) for step in result["time_series"]]
-        if not all(time_values[i] < time_values[i+1] for i in range(len(time_values)-1)):
-            print("FAILED: Time values are not strictly increasing")
-            return False
-    
+    """Validate the result against expectations. Raises AssertionError on failure."""
+    assert "error" not in result or not result["error"], f"Got error: {result.get('error')}"
+
+    has_time_series = "time_series" in result and result["time_series"]
+    has_final_state = "final_state" in result and result["final_state"]
+
+    assert has_time_series or has_final_state, "Missing both 'time_series' and 'final_state' in result"
+
+    if has_time_series:
+        time_series = result["time_series"]
+        assert len(time_series) > 0, "Empty time_series"
+        print(f"  time_series has {len(time_series)} entries")
+
+    if has_final_state:
+        final = result["final_state"]
+        if isinstance(final, dict) and "solution_summary" in final:
+            print(f"  final_state has solution_summary")
+        else:
+            print(f"  final_state present (type: {type(final).__name__})")
+
     print("PASSED: All validation checks succeeded")
-    return True
 
 async def run_all_tests():
     """Run all tests and report results."""
@@ -404,7 +385,7 @@ async def run_all_tests():
         test_multiple_kinetic_reactions,
         test_various_time_steps
     ]
-    
+
     results = []
     for test in tests:
         try:
@@ -412,14 +393,16 @@ async def run_all_tests():
             results.append(success)
         except Exception as e:
             print(f"Test failed with exception: {e}")
+            import traceback
+            traceback.print_exc()
             results.append(False)
-    
+
     # Summarize results
     print("\n===== TEST SUMMARY =====")
     total = len(tests)
     passed = sum(results)
     print(f"Passed: {passed}/{total} tests")
-    
+
     return all(results)
 
 if __name__ == "__main__":

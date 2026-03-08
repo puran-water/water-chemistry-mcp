@@ -7,7 +7,7 @@ which models Fe-P precipitation with surface complexation and redox awareness.
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, model_validator
 
 from .schemas import SolutionOutput, WaterAnalysisInput
 
@@ -77,17 +77,13 @@ class RedoxSpecification(BaseModel):
         le=1,
     )
 
-    @validator("orp_mv", always=True)
-    def validate_orp(cls, v, values):
-        if values.get("mode") == "pe_from_orp" and v is None:
+    @model_validator(mode="after")
+    def validate_orp_and_pe(self):
+        if self.mode == "pe_from_orp" and self.orp_mv is None:
             raise ValueError("orp_mv is required when mode='pe_from_orp'")
-        return v
-
-    @validator("pe_value", always=True)
-    def validate_pe(cls, v, values):
-        if values.get("mode") == "fixed_pe" and v is None:
+        if self.mode == "fixed_pe" and self.pe_value is None:
             raise ValueError("pe_value is required when mode='fixed_pe'")
-        return v
+        return self
 
 
 # --- Surface Complexation Options ---
@@ -195,11 +191,11 @@ class PhAdjustmentOptions(BaseModel):
         le=50,
     )
 
-    @validator("target_ph", always=True)
-    def validate_target_ph(cls, v, values):
-        if values.get("enabled") and v is None:
+    @model_validator(mode="after")
+    def validate_target_ph(self):
+        if self.enabled and self.target_ph is None:
             raise ValueError("target_ph is required when pH adjustment is enabled")
-        return v
+        return self
 
 
 # --- Main Input Schema ---
@@ -293,15 +289,15 @@ class CalculateFerricDoseInput(BaseModel):
         ge=10,
     )
 
-    @validator("target_residual_p_mg_l")
-    def validate_target_p(cls, v, values):
-        # Get initial P from solution if available
-        initial_solution = values.get("initial_solution")
-        if initial_solution and initial_solution.analysis:
-            initial_p = initial_solution.analysis.get("P", initial_solution.analysis.get("P(5)", 0))
-            if isinstance(initial_p, (int, float)) and v >= initial_p:
-                raise ValueError(f"Target P ({v} mg/L) must be less than initial P ({initial_p} mg/L)")
-        return v
+    @model_validator(mode="after")
+    def validate_target_p(self):
+        if self.initial_solution and self.initial_solution.analysis:
+            initial_p = self.initial_solution.analysis.get("P", self.initial_solution.analysis.get("P(5)", 0))
+            if isinstance(initial_p, (int, float)) and self.target_residual_p_mg_l >= initial_p:
+                raise ValueError(
+                    f"Target P ({self.target_residual_p_mg_l} mg/L) must be less than initial P ({initial_p} mg/L)"
+                )
+        return self
 
 
 # --- Partitioning Output ---

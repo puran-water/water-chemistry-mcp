@@ -7,13 +7,12 @@ empty strings on error. This ensures errors are never silently ignored.
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from .exceptions import (
     GasPhaseError,
     InputValidationError,
     KineticsDefinitionError,
-    RedoxSpecificationError,
     SurfaceDefinitionError,
 )
 
@@ -648,10 +647,30 @@ def build_kinetics_block(kinetics_def: Dict[str, Any], time_def: Dict[str, Any],
                     if "START" not in rate_law:
                         rates_lines.append("-start")
 
-                    # Add the rate law code with indentation
+                    # Add the rate law code with BASIC line numbers.
+                    # Strip leading whitespace (dedent) since user rate_law
+                    # strings often come from triple-quoted Python strings.
                     if isinstance(rate_law, str):
-                        for line in rate_law.splitlines():
-                            rates_lines.append(f"    {line}")
+                        import re as _re
+                        import textwrap
+                        dedented = textwrap.dedent(rate_law)
+                        # Filter out empty/comment-only lines
+                        code_lines = [
+                            ln.strip()
+                            for ln in dedented.splitlines()
+                            if ln.strip() and not ln.strip().startswith("#")
+                        ]
+                        # Check if lines already have BASIC line numbers
+                        _LINE_NUM_RE = _re.compile(r"^\d+\s")
+                        has_numbers = any(_LINE_NUM_RE.match(ln) for ln in code_lines)
+                        if has_numbers:
+                            # Lines already numbered — pass through as-is
+                            for code_line in code_lines:
+                                rates_lines.append(f"    {code_line}")
+                        else:
+                            # Add BASIC line numbers (10, 20, 30, ...)
+                            for i, code_line in enumerate(code_lines, start=1):
+                                rates_lines.append(f"    {i * 10} {code_line}")
 
                     if "END" not in rate_law and "-end" not in rate_law:
                         rates_lines.append("-end")
@@ -698,6 +717,21 @@ def build_kinetics_block(kinetics_def: Dict[str, Any], time_def: Dict[str, Any],
                             if isinstance(formula, str):
                                 kinetics_lines.append(f"        -formula {formula}")
                             elif isinstance(formula, dict):
+                                # Validate: PHREEQC -formula only accepts bare element
+                                # symbols (e.g. "N", "Fe", "O"), NOT redox species
+                                # notation like "N(5)", "Fe(2)", "O(0)".
+                                import re
+                                _REDOX_RE = re.compile(r"^[A-Z][a-z]?\(-?\d+\)$")
+                                for elem in formula:
+                                    if _REDOX_RE.match(elem):
+                                        raise KineticsDefinitionError(
+                                            f"Invalid element '{elem}' in KINETICS -formula. "
+                                            f"PHREEQC -formula requires bare element symbols "
+                                            f"(e.g. 'N', 'Fe', 'O'), not redox species notation "
+                                            f"(e.g. 'N(5)', 'Fe(2)', 'O(0)'). Use the rate law "
+                                            f"RATES block to reference redox species via TOT().",
+                                            missing_fields=[elem],
+                                        )
                                 # Convert dict to formatted string
                                 formula_parts = []
                                 for elem, coef in formula.items():
@@ -705,10 +739,43 @@ def build_kinetics_block(kinetics_def: Dict[str, Any], time_def: Dict[str, Any],
                                 formula_str = " ".join(formula_parts)
                                 kinetics_lines.append(f"        -formula {formula_str}")
 
-                        # Add parameters
+                        # Add parameters with proper PHREEQC keyword mapping
                         if parameters:
+                            # Map user-friendly names to valid PHREEQC keywords
+                            _KINETICS_PARAM_MAP = {
+                                "m0": "m0", "m": "m", "tol": "tol",
+                                "formula": "formula", "steps": "steps",
+                                "initial_moles": "m0", "current_moles": "m",
+                                "tolerance": "tol",
+                                "parms": "parms", "parameters": "parms", "params": "parms",
+                            }
+                            _KINETICS_DIRECT = {
+                                "bad_step_max", "runge_kutta", "step_divide",
+                                "cvode", "cvode_order", "cvode_steps",
+                            }
+                            parms_values = []
                             for param_name, param_value in parameters.items():
-                                kinetics_lines.append(f"        -{param_name} {param_value}")
+                                mapped = _KINETICS_PARAM_MAP.get(param_name)
+                                if mapped == "parms":
+                                    # Collect parms values for a single -parms line
+                                    if isinstance(param_value, list):
+                                        parms_values.extend(param_value)
+                                    else:
+                                        parms_values.append(param_value)
+                                elif mapped:
+                                    kinetics_lines.append(f"        -{mapped} {param_value}")
+                                elif param_name in _KINETICS_DIRECT:
+                                    kinetics_lines.append(f"        -{param_name} {param_value}")
+                                else:
+                                    raise KineticsDefinitionError(
+                                        f"Unknown KINETICS parameter '{param_name}'. "
+                                        f"Valid: {sorted(_KINETICS_PARAM_MAP.keys())}",
+                                        missing_fields=[param_name],
+                                    )
+                            if parms_values:
+                                kinetics_lines.append(
+                                    f"        -parms {' '.join(str(v) for v in parms_values)}"
+                                )
 
                     reaction_count += 1
 

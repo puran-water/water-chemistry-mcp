@@ -10,12 +10,10 @@ for advanced configurations, as phreeqpython has limited native support.
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from utils.database_management import database_manager
 from utils.exceptions import (
-    DatabaseLoadError,
-    FeatureNotSupportedError,
     InputValidationError,
     PhreeqcSimulationError,
     SurfaceDefinitionError,
@@ -23,11 +21,12 @@ from utils.exceptions import (
 from utils.helpers import build_selected_output_block, build_solution_block, build_surface_block
 from utils.import_helpers import PHREEQPYTHON_AVAILABLE
 
-from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
+from utils.exceptions import PhreeqcError
+
+from .phreeqc import run_phreeqc_simulation
 from .schemas import (
     SimulateSurfaceInteractionInput,
     SimulateSurfaceInteractionOutput,
-    SolutionOutput,
 )
 
 logger = logging.getLogger(__name__)
@@ -109,6 +108,7 @@ async def simulate_surface_interaction(input_data: Dict[str, Any]) -> Dict[str, 
         phreeqc_input += surface_str + "\n"
         phreeqc_input += "USE solution 1\n"
         phreeqc_input += "USE surface 1\n"
+        phreeqc_input += "SAVE solution 2\n"
         phreeqc_input += build_selected_output_block(
             block_num=1,
             saturation_indices=True,

@@ -7,7 +7,7 @@ Supports pe, Eh, and redox couple equilibration.
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from utils.database_management import database_manager
 from utils.exceptions import (
@@ -19,11 +19,10 @@ from utils.exceptions import (
 from utils.helpers import build_selected_output_block, build_solution_block
 from utils.import_helpers import PHREEQPYTHON_AVAILABLE
 
-from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
+from .phreeqc import run_phreeqc_simulation
 from .schemas import (
     SimulateRedoxAdjustmentInput,
     SimulateRedoxAdjustmentOutput,
-    SolutionOutput,
 )
 
 logger = logging.getLogger(__name__)
@@ -312,6 +311,7 @@ async def _simulate_redox_couple_script(
         phreeqc_input += gas_str + "\n"
         phreeqc_input += "USE solution 1\n"
         phreeqc_input += "USE gas_phase 1\n"
+        phreeqc_input += "SAVE solution 2\n"
         phreeqc_input += build_selected_output_block(
             block_num=1,
             saturation_indices=True,

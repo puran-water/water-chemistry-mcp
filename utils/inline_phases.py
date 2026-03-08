@@ -47,7 +47,8 @@ Usage:
 """
 
 import logging
-from typing import Dict, List, Optional
+import re
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -344,7 +345,10 @@ def check_phases_in_database(
     phases: List[str],
 ) -> Dict[str, bool]:
     """
-    Check which phases are available in a PHREEQC database.
+    Check which phases exist in any PHASES section of a PHREEQC database.
+
+    Handles databases with multiple PHASES sections (e.g. minteq.v4.dat)
+    and numbered phase-definition lines (e.g. wateq4f.dat: ``Calcite 12``).
 
     Args:
         database_path: Path to PHREEQC database file
@@ -354,19 +358,45 @@ def check_phases_in_database(
         Dictionary mapping phase name to availability (True/False)
     """
     availability = {phase: False for phase in phases}
+    if not phases:
+        return availability
+
+    # PHREEQC section keywords that can follow a PHASES block
+    _SECTION_KEYWORDS = (
+        "SOLUTION_MASTER_SPECIES|SOLUTION_SPECIES|PHASES|"
+        "EXCHANGE_MASTER_SPECIES|EXCHANGE_SPECIES|"
+        "SURFACE_MASTER_SPECIES|SURFACE_SPECIES|"
+        "RATES|END|MEAN_GAMMAS|KNOBS|LLNL_AQUEOUS_MODEL_PARAMETERS|"
+        "NAMED_EXPRESSIONS|SIT"
+    )
 
     try:
         with open(database_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
 
-        # Look for each phase name in the PHASES section
+        # Extract ALL PHASES blocks (some databases have multiple).
+        # Terminate at known PHREEQC section keywords, not any uppercase word
+        # (which would match element symbols like 'S', 'O', etc.)
+        phases_blocks = re.findall(
+            rf"^PHASES\b(.*?)(?=^(?:{_SECTION_KEYWORDS})\b|\Z)",
+            content,
+            re.MULTILINE | re.DOTALL,
+        )
+        if not phases_blocks:
+            return availability
+
+        combined_phases = "\n".join(phases_blocks)
         for phase in phases:
-            # Simple check: phase name appears followed by newline (start of definition)
-            if f"\n{phase}\n" in content or f"\n{phase} " in content:
+            # Phase name at start of line, optionally followed by number (wateq4f style)
+            if re.search(
+                rf"^\s*{re.escape(phase)}\s*(\d+)?\s*$",
+                combined_phases,
+                re.MULTILINE,
+            ):
                 availability[phase] = True
 
-    except Exception as e:
-        logger.warning(f"Could not check database {database_path}: {e}")
+    except (OSError, IOError) as e:
+        raise RuntimeError(f"Could not read database {database_path}: {e}") from e
 
     return availability
 

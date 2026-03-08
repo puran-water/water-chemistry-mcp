@@ -2,43 +2,9 @@
 Helper functions for checking and importing dependencies.
 """
 
-import glob
 import logging
 import os
-import sys
 from typing import List, Optional
-
-# Path to the USGS PHREEQC database files - check environment variables first, then fallback paths
-USGS_PHREEQC_DATABASE_PATH = None
-
-# First, check environment variables
-env_paths = [
-    os.environ.get("USGS_PHREEQC_DATABASE_PATH"),
-    os.environ.get("PHREEQC_DATABASE_DIR"),
-    os.environ.get("PHREEQC_DATABASE_PATH"),
-]
-
-for env_path in env_paths:
-    if env_path and os.path.exists(env_path) and os.path.isdir(env_path):
-        USGS_PHREEQC_DATABASE_PATH = env_path
-        break
-
-# If no environment variable path works, try hardcoded fallback paths
-if USGS_PHREEQC_DATABASE_PATH is None:
-    USGS_PHREEQC_DATABASE_PATHS = [
-        r"C:\Program Files\USGS\phreeqc-3.8.6-17100-x64\database",  # Windows path
-        r"C:\Program Files\USGS\phreeqc-3.8.6-17100-x6\database",  # Windows path (x6 variant)
-        r"/mnt/c/Program Files/USGS/phreeqc-3.8.6-17100-x64/database",  # WSL path to Windows
-        r"/mnt/c/Program Files/USGS/phreeqc-3.8.6-17100-x6/database",  # WSL path to Windows (x6 variant)
-        r"/opt/phreeqc/database",  # Docker/Linux path
-        r"/usr/local/share/phreeqc/database",  # Alternative Linux path
-    ]
-
-    # Find the first valid USGS PHREEQC database path
-    for path in USGS_PHREEQC_DATABASE_PATHS:
-        if os.path.exists(path):
-            USGS_PHREEQC_DATABASE_PATH = path
-            break
 
 logger = logging.getLogger(__name__)
 
@@ -53,72 +19,68 @@ try:
     DEFAULT_DATABASE = None
     DEFAULT_DATABASE_PATH = None
 
-    # PRIORITY: Use PhreeqPython's bundled databases for portability
-    # This ensures the MCP server works consistently across all installations
-    # without requiring USGS PHREEQC to be installed separately
-    try:
-        pkg_dir = os.path.dirname(phreeqpython.__file__)
-        potential_db_paths = [
-            os.path.join(pkg_dir, "database"),
-            os.path.join(pkg_dir, "databases"),
-            os.path.join(os.path.dirname(pkg_dir), "database"),
-        ]
+    # PRIORITY 1: Repo-local databases
+    _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for _sub_dir in ["databases/official", "databases/custom"]:
+        _local_db_dir = os.path.join(_repo_root, _sub_dir)
+        if os.path.exists(_local_db_dir) and os.path.isdir(_local_db_dir):
+            DEFAULT_DATABASE_PATH = _local_db_dir
+            logger.info(f"Found repo-local database directory: {DEFAULT_DATABASE_PATH}")
+            break
 
-        for path in potential_db_paths:
-            if os.path.exists(path) and os.path.isdir(path):
-                DEFAULT_DATABASE_PATH = path
-                logger.info(f"Found PhreeqPython database directory: {DEFAULT_DATABASE_PATH}")
+    if DEFAULT_DATABASE_PATH:
+        from .constants import DEFAULT_DATABASE_NAMES
+
+        for db_name in DEFAULT_DATABASE_NAMES:
+            potential_path = os.path.join(DEFAULT_DATABASE_PATH, db_name)
+            if os.path.exists(potential_path):
+                DEFAULT_DATABASE = potential_path
+                logger.info(f"Using repo-local database: {DEFAULT_DATABASE}")
                 break
-
-        if DEFAULT_DATABASE_PATH:
-            from .constants import DEFAULT_DATABASE_NAMES
-
-            for db_name in DEFAULT_DATABASE_NAMES:
-                potential_path = os.path.join(DEFAULT_DATABASE_PATH, db_name)
-                if os.path.exists(potential_path):
-                    DEFAULT_DATABASE = potential_path
-                    logger.info(f"Using PhreeqPython bundled database: {DEFAULT_DATABASE}")
+        else:
+            # Use first .dat file found
+            for file in sorted(os.listdir(DEFAULT_DATABASE_PATH)):
+                if file.endswith(".dat"):
+                    DEFAULT_DATABASE = os.path.join(DEFAULT_DATABASE_PATH, file)
+                    logger.info(f"Using repo-local database: {DEFAULT_DATABASE}")
                     break
-            else:
-                # If we didn't find any specific database from DEFAULT_DATABASE_NAMES
-                # Use the first .dat file found
-                for file in os.listdir(DEFAULT_DATABASE_PATH):
-                    if file.endswith(".dat"):
-                        DEFAULT_DATABASE = os.path.join(DEFAULT_DATABASE_PATH, file)
-                        logger.info(f"Using PhreeqPython database: {DEFAULT_DATABASE}")
+
+    # PRIORITY 2: PhreeqPython bundled databases (if no repo-local found)
+    if DEFAULT_DATABASE is None:
+        try:
+            pkg_dir = os.path.dirname(phreeqpython.__file__)
+            potential_db_paths = [
+                os.path.join(pkg_dir, "database"),
+                os.path.join(pkg_dir, "databases"),
+                os.path.join(os.path.dirname(pkg_dir), "database"),
+            ]
+
+            for path in potential_db_paths:
+                if os.path.exists(path) and os.path.isdir(path):
+                    DEFAULT_DATABASE_PATH = path
+                    logger.info(f"Found PhreeqPython database directory: {DEFAULT_DATABASE_PATH}")
+                    break
+
+            if DEFAULT_DATABASE_PATH:
+                from .constants import DEFAULT_DATABASE_NAMES
+
+                for db_name in DEFAULT_DATABASE_NAMES:
+                    potential_path = os.path.join(DEFAULT_DATABASE_PATH, db_name)
+                    if os.path.exists(potential_path):
+                        DEFAULT_DATABASE = potential_path
+                        logger.info(f"Using PhreeqPython bundled database: {DEFAULT_DATABASE}")
                         break
                 else:
-                    DEFAULT_DATABASE = None
-                    logger.debug("No .dat database files in PhreeqPython directory.")
+                    for file in os.listdir(DEFAULT_DATABASE_PATH):
+                        if file.endswith(".dat"):
+                            DEFAULT_DATABASE = os.path.join(DEFAULT_DATABASE_PATH, file)
+                            logger.info(f"Using PhreeqPython database: {DEFAULT_DATABASE}")
+                            break
+        except Exception as e:
+            logger.debug(f"Error locating PhreeqPython bundled databases: {e}")
 
-    except Exception as e:
-        logger.debug(f"Error locating PhreeqPython bundled databases: {e}")
-
-    # FALLBACK: Use USGS PHREEQC databases if PhreeqPython bundled databases not found
     if DEFAULT_DATABASE is None:
-        if (
-            USGS_PHREEQC_DATABASE_PATH
-            and os.path.exists(USGS_PHREEQC_DATABASE_PATH)
-            and os.path.isdir(USGS_PHREEQC_DATABASE_PATH)
-        ):
-            DEFAULT_DATABASE_PATH = USGS_PHREEQC_DATABASE_PATH
-            logger.info(f"Falling back to USGS PHREEQC database directory: {DEFAULT_DATABASE_PATH}")
-
-            from .constants import PREFERRED_DATABASE_NAMES
-
-            for db_name in PREFERRED_DATABASE_NAMES:
-                potential_path = os.path.join(DEFAULT_DATABASE_PATH, db_name)
-                if os.path.exists(potential_path):
-                    DEFAULT_DATABASE = potential_path
-                    logger.info(f"Using USGS PHREEQC database: {DEFAULT_DATABASE}")
-                    break
-            else:
-                dat_files = glob.glob(os.path.join(DEFAULT_DATABASE_PATH, "*.dat"))
-                if dat_files:
-                    DEFAULT_DATABASE = dat_files[0]
-                    logger.info(f"Using first available USGS PHREEQC database: {DEFAULT_DATABASE}")
-        else:
-            logger.warning("No PHREEQC databases found. Some features may not work.")
+        logger.warning("No PHREEQC databases found. Some features may not work.")
 
 except ImportError:
     PHREEQPYTHON_AVAILABLE = False
@@ -130,11 +92,23 @@ except ImportError:
 def get_available_database_paths() -> List[str]:
     """
     Returns a list of available PHREEQC database paths.
-    Prioritizes PhreeqPython bundled databases for portability.
+    Priority: repo-local > PhreeqPython bundled.
     """
     available_dbs = []
 
-    # PRIORITY: PhreeqPython bundled databases for portability (if installed)
+    # PRIORITY 1: Repo-local databases (databases/official/ and databases/custom/)
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for sub_dir in ["databases/official", "databases/custom"]:
+        local_db_dir = os.path.join(repo_root, sub_dir)
+        if os.path.exists(local_db_dir) and os.path.isdir(local_db_dir):
+            for file in sorted(os.listdir(local_db_dir)):
+                if file.endswith(".dat"):
+                    db_path = os.path.join(local_db_dir, file)
+                    if db_path not in available_dbs:
+                        available_dbs.append(db_path)
+                        logger.debug(f"Found repo-local database: {db_path}")
+
+    # PRIORITY 2: PhreeqPython bundled databases (for databases not in repo)
     if PHREEQPYTHON_AVAILABLE:
         try:
             pkg_dir = os.path.dirname(phreeqpython.__file__)
@@ -163,32 +137,10 @@ def get_available_database_paths() -> List[str]:
                                 available_dbs.append(db_path)
                                 logger.debug(f"Found additional PhreeqPython database: {db_path}")
 
-                    if available_dbs:
-                        logger.info(f"Found {len(available_dbs)} databases in PhreeqPython package")
-                        break
+                    logger.info("Found databases in PhreeqPython package")
+                    break
         except Exception as e:
             logger.debug(f"Error searching PhreeqPython package for databases: {e}")
-
-    # FALLBACK: USGS PHREEQC databases if needed
-    if (
-        USGS_PHREEQC_DATABASE_PATH
-        and os.path.exists(USGS_PHREEQC_DATABASE_PATH)
-        and os.path.isdir(USGS_PHREEQC_DATABASE_PATH)
-    ):
-        from .constants import PREFERRED_DATABASE_NAMES
-
-        for db_name in PREFERRED_DATABASE_NAMES:
-            db_path = os.path.join(USGS_PHREEQC_DATABASE_PATH, db_name)
-            if os.path.exists(db_path) and db_path not in available_dbs:
-                available_dbs.append(db_path)
-                logger.debug(f"Found USGS PHREEQC database: {db_path}")
-
-        for file in os.listdir(USGS_PHREEQC_DATABASE_PATH):
-            if file.endswith(".dat"):
-                db_path = os.path.join(USGS_PHREEQC_DATABASE_PATH, file)
-                if db_path not in available_dbs:
-                    available_dbs.append(db_path)
-                    logger.debug(f"Found additional USGS database: {db_path}")
 
     if available_dbs:
         logger.info(f"Found {len(available_dbs)} total database files")
@@ -201,16 +153,13 @@ def get_available_database_paths() -> List[str]:
 def get_default_database() -> Optional[str]:
     """
     Returns the default database path for PHREEQC simulations.
-    Prioritizes USGS PHREEQC databases over PhreeqPython defaults.
+    Prioritizes repo-local databases.
     """
-    # If we already selected a preferred database, return it
     if DEFAULT_DATABASE:
         return DEFAULT_DATABASE
 
-    # Otherwise, search for available databases in order of preference
     available_dbs = get_available_database_paths()
     if available_dbs:
-        # First database in the list is the highest priority
         return available_dbs[0]
 
     return None

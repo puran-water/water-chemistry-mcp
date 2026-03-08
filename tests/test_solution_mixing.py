@@ -60,7 +60,7 @@ async def test_basic_mixing_two_solutions(results: TestResults):
                         "pH": 7.0
                     },
                     "temperature": 25,
-                    "volume_fraction": 0.5
+                    "fraction": 0.5
                 },
                 {
                     "analysis": {
@@ -70,7 +70,7 @@ async def test_basic_mixing_two_solutions(results: TestResults):
                         "pH": 8.0
                     },
                     "temperature": 25,
-                    "volume_fraction": 0.5
+                    "fraction": 0.5
                 }
             ],
             "allow_precipitation": False
@@ -108,7 +108,7 @@ async def test_mixing_with_temperature_difference(results: TestResults):
                         "pH": 7.5
                     },
                     "temperature": 10,  # Cold water
-                    "volume_fraction": 0.3
+                    "fraction": 0.3
                 },
                 {
                     "analysis": {
@@ -117,7 +117,7 @@ async def test_mixing_with_temperature_difference(results: TestResults):
                         "pH": 7.5
                     },
                     "temperature": 40,  # Hot water
-                    "volume_fraction": 0.7
+                    "fraction": 0.7
                 }
             ],
             "allow_precipitation": False
@@ -152,7 +152,7 @@ async def test_mixing_with_equilibrium_precipitation(results: TestResults):
                         "pH": 7.0
                     },
                     "temperature": 25,
-                    "volume_fraction": 0.5
+                    "fraction": 0.5
                 },
                 {
                     "analysis": {
@@ -161,7 +161,7 @@ async def test_mixing_with_equilibrium_precipitation(results: TestResults):
                         "pH": 10.0
                     },
                     "temperature": 25,
-                    "volume_fraction": 0.5
+                    "fraction": 0.5
                 }
             ],
             "allow_precipitation": True,
@@ -198,7 +198,7 @@ async def test_mixing_with_kinetic_precipitation(results: TestResults):
                         "pH": 7.5
                     },
                     "temperature": 20,
-                    "volume_fraction": 0.6
+                    "fraction": 0.6
                 },
                 {
                     "analysis": {
@@ -207,7 +207,7 @@ async def test_mixing_with_kinetic_precipitation(results: TestResults):
                         "pH": 9.5
                     },
                     "temperature": 20,
-                    "volume_fraction": 0.4
+                    "fraction": 0.4
                 }
             ],
             "allow_precipitation": True,
@@ -255,7 +255,7 @@ async def test_multiple_solution_mixing(results: TestResults):
                         "pH": 6.5
                     },
                     "temperature": 15,
-                    "volume_fraction": 0.4
+                    "fraction": 0.4
                 },
                 {
                     "analysis": {
@@ -265,7 +265,7 @@ async def test_multiple_solution_mixing(results: TestResults):
                         "pH": 7.5
                     },
                     "temperature": 20,
-                    "volume_fraction": 0.3
+                    "fraction": 0.3
                 },
                 {
                     "analysis": {
@@ -275,7 +275,7 @@ async def test_multiple_solution_mixing(results: TestResults):
                         "pH": 8.5
                     },
                     "temperature": 25,
-                    "volume_fraction": 0.3
+                    "fraction": 0.3
                 }
             ],
             "allow_precipitation": False
@@ -317,7 +317,7 @@ async def test_seawater_freshwater_mixing(results: TestResults):
                         "pH": 8.2
                     },
                     "temperature": 25,
-                    "volume_fraction": 0.1  # 10% seawater
+                    "fraction": 0.1  # 10% seawater
                 },
                 {
                     "analysis": {
@@ -329,7 +329,7 @@ async def test_seawater_freshwater_mixing(results: TestResults):
                         "pH": 7.5
                     },
                     "temperature": 20,
-                    "volume_fraction": 0.9  # 90% freshwater
+                    "fraction": 0.9  # 90% freshwater
                 }
             ],
             "allow_precipitation": True,
@@ -367,7 +367,7 @@ async def test_industrial_wastewater_mixing(results: TestResults):
                         "Cl": 500
                     },
                     "temperature": 30,
-                    "volume_fraction": 0.2
+                    "fraction": 0.2
                 },
                 {
                     "analysis": {
@@ -376,7 +376,7 @@ async def test_industrial_wastewater_mixing(results: TestResults):
                         "pH": 11.5
                     },
                     "temperature": 25,
-                    "volume_fraction": 0.3
+                    "fraction": 0.3
                 },
                 {
                     "analysis": {
@@ -386,7 +386,7 @@ async def test_industrial_wastewater_mixing(results: TestResults):
                         "pH": 7.0
                     },
                     "temperature": 20,
-                    "volume_fraction": 0.5
+                    "fraction": 0.5
                 }
             ],
             "allow_precipitation": True,
@@ -422,7 +422,7 @@ async def test_mixing_with_gases(results: TestResults):
                         "pH": 6.0
                     },
                     "temperature": 25,
-                    "volume_fraction": 0.5
+                    "fraction": 0.5
                 },
                 {
                     "analysis": {
@@ -431,7 +431,7 @@ async def test_mixing_with_gases(results: TestResults):
                         "pH": 9.0
                     },
                     "temperature": 25,
-                    "volume_fraction": 0.5
+                    "fraction": 0.5
                 }
             ],
             "gas_phases": [
@@ -458,7 +458,7 @@ async def test_mixing_with_gases(results: TestResults):
         results.record_fail(test_name, str(e))
 
 
-async def test_volume_fraction_validation(results: TestResults):
+async def test_fraction_validation(results: TestResults):
     """Test volume fraction validation and normalization"""
     test_name = "Volume fraction validation"
     
@@ -468,11 +468,11 @@ async def test_volume_fraction_validation(results: TestResults):
             "solutions": [
                 {
                     "analysis": {"Ca": 100, "pH": 7.0},
-                    "volume_fraction": 0.3
+                    "fraction": 0.3
                 },
                 {
                     "analysis": {"Ca": 200, "pH": 8.0},
-                    "volume_fraction": 0.4
+                    "fraction": 0.4
                 }
                 # Sum = 0.7, should be normalized
             ]
@@ -510,7 +510,7 @@ async def test_edge_cases(results: TestResults):
             "solutions": [
                 {
                     "analysis": {"Ca": 100, "pH": 7.0},
-                    "volume_fraction": 1.0
+                    "fraction": 1.0
                 }
             ]
         }
@@ -523,11 +523,11 @@ async def test_edge_cases(results: TestResults):
             "solutions": [
                 {
                     "analysis": {"pH": 2.0, "Cl": 100},
-                    "volume_fraction": 0.1
+                    "fraction": 0.1
                 },
                 {
                     "analysis": {"pH": 12.0, "Na": 100},
-                    "volume_fraction": 0.9
+                    "fraction": 0.9
                 }
             ]
         }
@@ -540,11 +540,11 @@ async def test_edge_cases(results: TestResults):
             "solutions": [
                 {
                     "analysis": {"Ca": 100, "pH": 7.0},
-                    "volume_fraction": 0.0
+                    "fraction": 0.0
                 },
                 {
                     "analysis": {"Ca": 200, "pH": 8.0},
-                    "volume_fraction": 1.0
+                    "fraction": 1.0
                 }
             ]
         }
@@ -573,7 +573,7 @@ async def test_mixing_with_kinetic_custom(results: TestResults):
                         "pH": 7.0
                     },
                     "temperature": 25,
-                    "volume_fraction": 0.5
+                    "fraction": 0.5
                 },
                 {
                     "analysis": {
@@ -582,7 +582,7 @@ async def test_mixing_with_kinetic_custom(results: TestResults):
                         "pH": 8.0
                     },
                     "temperature": 25,
-                    "volume_fraction": 0.5
+                    "fraction": 0.5
                 }
             ],
             "allow_precipitation": True,
@@ -629,7 +629,7 @@ async def main():
     await test_seawater_freshwater_mixing(results)
     await test_industrial_wastewater_mixing(results)
     await test_mixing_with_gases(results)
-    await test_volume_fraction_validation(results)
+    await test_fraction_validation(results)
     await test_edge_cases(results)
     await test_mixing_with_kinetic_custom(results)
     

@@ -13,12 +13,11 @@ import os
 import pickle
 import shutil
 import tempfile
-import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional
 
 # Import database directory constants
-from .database_downloader import CACHED_DIR, CUSTOM_DIR, DATABASE_DIR, METADATA_DIR, OFFICIAL_DIR
+from .database_downloader import CACHED_DIR
 
 logger = logging.getLogger(__name__)
 

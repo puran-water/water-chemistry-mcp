@@ -6,13 +6,10 @@ Uses PHREEQC KINETICS and RATES blocks for time-dependent reactions.
 """
 
 import logging
-import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from utils.database_management import database_manager
 from utils.exceptions import (
-    DatabaseLoadError,
-    FeatureNotSupportedError,
     InputValidationError,
     KineticsDefinitionError,
     PhreeqcSimulationError,
@@ -25,7 +22,9 @@ from utils.helpers import (
 )
 from utils.import_helpers import PHREEQPYTHON_AVAILABLE
 
-from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
+from utils.exceptions import PhreeqcError
+
+from .phreeqc import run_phreeqc_simulation
 from .schemas import SimulateKineticReactionInput, SimulateKineticReactionOutput, SolutionOutput
 
 logger = logging.getLogger(__name__)
@@ -150,8 +149,18 @@ async def simulate_kinetic_reaction(input_data: Dict[str, Any]) -> Dict[str, Any
 
         logger.debug(f"PHREEQC input:\n{phreeqc_input[:500]}...")
 
+        # Compute number of time steps for multi-step parsing
+        num_time_steps = 1
+        tv = time_def.get("time_values")
+        if tv and isinstance(tv, list) and len(tv) > 1:
+            num_time_steps = len(tv)
+        elif "count" in time_def and time_def.get("count"):
+            num_time_steps = time_def["count"]
+
         # Run simulation
-        results = await run_phreeqc_simulation(phreeqc_input, database_path=database_path)
+        results = await run_phreeqc_simulation(
+            phreeqc_input, database_path=database_path, num_steps=num_time_steps
+        )
 
         # If we got a list (multiple time steps), get the last result
         if isinstance(results, list):
@@ -258,8 +267,18 @@ async def simulate_kinetic_reaction_time_series(input_data: Dict[str, Any]) -> D
         )
         phreeqc_input += "END\n"
 
+        # Compute number of time steps for multi-step parsing
+        num_time_steps = 1
+        tv = time_def.get("time_values")
+        if tv and isinstance(tv, list) and len(tv) > 1:
+            num_time_steps = len(tv)
+        elif "count" in time_def and time_def.get("count"):
+            num_time_steps = time_def["count"]
+
         # Run simulation
-        results = await run_phreeqc_simulation(phreeqc_input, database_path=database_path)
+        results = await run_phreeqc_simulation(
+            phreeqc_input, database_path=database_path, num_steps=num_time_steps
+        )
 
         # Process results
         if isinstance(results, list):

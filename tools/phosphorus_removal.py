@@ -20,20 +20,18 @@ import copy
 import logging
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 
 from utils.database_management import database_manager
-from utils.exceptions import InputValidationError
 from utils.inline_phases import (
     build_hao_phase_linked_surface_block,
+    check_phases_in_database,
     get_hao_surface_block,
-    get_p_removal_inline_blocks,
-    get_required_inline_blocks_for_database,
     get_struvite_phases_block,
     get_variscite_phases_block,
 )
 
-from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
+from .phreeqc import run_phreeqc_simulation
 from .schemas_ferric import (
     MOLECULAR_WEIGHTS,
     RedoxDiagnostics,
@@ -122,6 +120,134 @@ STRATEGY_CONFIG = {
         "prefer_brushite": True,  # Kinetically favored at moderate pH
     },
 }
+
+# Database recommendations per strategy
+STRATEGY_DATABASE_RECOMMENDATIONS = {
+    "iron": {
+        "recommended": "minteq.v4.dat",
+        "avoid": ["phreeqc.dat"],
+        "reason": "phreeqc.dat lacks Strengite (Fe-P precipitate for aerobic mode)",
+    },
+    "aluminum": {"recommended": "minteq.v4.dat"},
+    "struvite": {"recommended": "minteq.v4.dat"},
+    "calcium_phosphate": {"recommended": "minteq.v4.dat"},
+}
+
+
+def validate_strategy_database_compatibility(
+    strategy_name: str,
+    phases: List[str],
+    database_path: str,
+    inline_phreeqc_prefix: str,
+    is_aerobic: bool,
+    phases_dropped_during_remap: Optional[List[str]] = None,
+) -> List[str]:
+    """
+    Validate required phases exist in database or inline blocks.
+
+    Returns structured warnings (not exceptions) to preserve existing
+    status="input_error"/"infeasible" return semantics.
+
+    A warning prefixed with "FATAL:" indicates the simulation cannot proceed.
+
+    Args:
+        phases_dropped_during_remap: Phases that were silently dropped because
+            the database has no mapping for them (e.g. Strengite in phreeqc.dat).
+            These are checked separately since they never made it into ``phases``.
+    """
+    import os
+
+    db_name = os.path.basename(database_path)
+    warnings: List[str] = []
+
+    # Check which phases are actually in the database
+    db_availability = check_phases_in_database(database_path, phases)
+
+    # For phases NOT in db, check if they appear in the inline prefix
+    missing_from_both = []
+    for phase, in_db in db_availability.items():
+        if not in_db:
+            # Check inline text (e.g. "Struvite" in inline_phreeqc_prefix)
+            if phase not in inline_phreeqc_prefix:
+                missing_from_both.append(phase)
+
+    # Also include phases that were dropped during iron phase remapping
+    # (e.g. Strengite when phreeqc.dat maps ferric_phosphate → None)
+    if phases_dropped_during_remap:
+        missing_from_both.extend(phases_dropped_during_remap)
+
+    if not missing_from_both:
+        return warnings
+
+    # Strategy-specific logic
+    if strategy_name == "iron":
+        # Iron needs at least a hydroxide phase (HFO substrate)
+        hydroxide_phases = {"Ferrihydrite", "Fe(OH)3(a)"}
+        has_hydroxide = any(p not in missing_from_both for p in phases if p in hydroxide_phases)
+        if not has_hydroxide and hydroxide_phases & set(missing_from_both):
+            warnings.append(
+                f"FATAL: Iron hydroxide phase (Ferrihydrite/Fe(OH)3(a)) not found in "
+                f"database '{db_name}' or inline blocks. Iron coagulation cannot proceed."
+            )
+            return warnings
+
+        # Check Fe-P phase availability
+        fe_p_phases = {"Strengite", "Vivianite"}
+        missing_fep = fe_p_phases & set(missing_from_both)
+        if missing_fep:
+            rec = STRATEGY_DATABASE_RECOMMENDATIONS.get("iron", {})
+            if is_aerobic and "Strengite" in missing_fep:
+                warnings.append(
+                    f"Database '{db_name}' lacks Strengite (direct Fe-P precipitate). "
+                    f"P removal will rely solely on HFO surface adsorption, which may "
+                    f"require higher Fe:P ratios. Recommended database: "
+                    f"{rec.get('recommended', 'minteq.v4.dat')}."
+                )
+            if not is_aerobic and "Vivianite" in missing_fep:
+                warnings.append(
+                    f"FATAL: Database '{db_name}' lacks Vivianite (Fe(II)-P precipitate). "
+                    f"Anaerobic Fe-P removal cannot proceed without a ferrous phosphate phase."
+                )
+
+        # Explicit sulfide phase warning for anaerobic
+        sulfide_phases = {"FeS(ppt)", "Mackinawite"}
+        if not is_aerobic and sulfide_phases & set(missing_from_both):
+            warnings.append(
+                f"Database '{db_name}' lacks iron sulfide phase (FeS(ppt)/Mackinawite). "
+                f"Sulfide competition for Fe will not be modeled."
+            )
+
+        # Non-critical missing phases
+        non_critical = set(missing_from_both) - hydroxide_phases - fe_p_phases - sulfide_phases
+        if non_critical:
+            warnings.append(f"Phases not found in '{db_name}': {sorted(non_critical)}. Simulation proceeds without them.")
+
+    elif strategy_name == "aluminum":
+        if "Variscite" in missing_from_both:
+            warnings.append(
+                f"Variscite not found in database '{db_name}' or inline blocks. "
+                f"Al-P removal relies on HAO surface adsorption only."
+            )
+
+    elif strategy_name == "struvite":
+        if "Struvite" in missing_from_both:
+            warnings.append(
+                f"FATAL: Struvite phase not found in database '{db_name}' or inline "
+                f"blocks. Struvite crystallization cannot be modeled."
+            )
+
+    elif strategy_name == "calcium_phosphate":
+        ca_p_phases = {"CaHPO4:2H2O", "Hydroxyapatite"}
+        missing_cap = ca_p_phases & set(missing_from_both)
+        if missing_cap == ca_p_phases:
+            warnings.append(
+                f"FATAL: No Ca-P phases (CaHPO4:2H2O, Hydroxyapatite) found in "
+                f"database '{db_name}' or inline blocks."
+            )
+        elif missing_cap:
+            warnings.append(f"Ca-P phase(s) missing from '{db_name}': {sorted(missing_cap)}.")
+
+    return warnings
 
 
 # =============================================================================
@@ -650,7 +776,7 @@ async def _run_sulfide_sensitivity_sweep(
     effective_target_p = target_p_mg_l - p_inert
 
     # Calculate P to remove (in mmol) for metal:P ratio
-    base_solution = input_model.initial_solution.dict()
+    base_solution = input_model.initial_solution.model_dump()
     initial_p_mg_l = _get_initial_p_mg_l(base_solution)
     p_to_remove_mg_l = initial_p_mg_l - effective_target_p
     p_to_remove_mmol = p_to_remove_mg_l / MOLECULAR_WEIGHTS["P"]
@@ -844,25 +970,27 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
             error_message=f"Input validation error: {e}",
             strategy_used="unknown",
             reagent_used="unknown",
-        ).dict(exclude_none=True)
+        ).model_dump(exclude_none=True)
 
     # Extract parameters
-    initial_solution = input_model.initial_solution.dict()
+    initial_solution = input_model.initial_solution.model_dump()
     target_p_mg_l = input_model.target_residual_p_mg_l
     strategy_spec = input_model.strategy
     redox = input_model.redox or RedoxSpecification(mode="aerobic")
     database = input_model.database or "minteq.v4.dat"
 
-    # Get strategy configuration
+    # Get strategy configuration (deep-copy to avoid mutating global config)
+    import copy
+
     strategy_name = strategy_spec.strategy
-    strategy_config = STRATEGY_CONFIG.get(strategy_name)
+    strategy_config = copy.deepcopy(STRATEGY_CONFIG.get(strategy_name))
     if not strategy_config:
         return CalculatePhosphorusRemovalDoseOutput(
             status="input_error",
             error_message=f"Unknown strategy: {strategy_name}",
             strategy_used=strategy_name,
             reagent_used="unknown",
-        ).dict(exclude_none=True)
+        ).model_dump(exclude_none=True)
 
     # Get reagent
     reagent = strategy_spec.reagent or strategy_config["default_reagent"]
@@ -873,7 +1001,7 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
             error_message=f"Unknown reagent: {reagent}",
             strategy_used=strategy_name,
             reagent_used=reagent,
-        ).dict(exclude_none=True)
+        ).model_dump(exclude_none=True)
 
     metal = reagent_info["metal"]
 
@@ -892,7 +1020,7 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
                 ),
                 strategy_used=strategy_name,
                 reagent_used=reagent,
-            ).dict(exclude_none=True)
+            ).model_dump(exclude_none=True)
 
         # Issue 7: Ca competition warning for struvite
         ca_mg_l = _get_element_mg_l(initial_solution, "Ca", ["Ca", "Calcium"])
@@ -962,7 +1090,7 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
                     ),
                     strategy_used=strategy_name,
                     reagent_used=reagent,
-                ).dict(exclude_none=True)
+                ).model_dump(exclude_none=True)
             elif sulfide_sensitivity is True:
                 # Run sulfide sensitivity sweep (will be implemented in output)
                 logger.info("Running sulfide sensitivity analysis for anaerobic iron mode without S(-2)")
@@ -985,7 +1113,7 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
             error_message="Could not determine initial P concentration from input",
             strategy_used=strategy_name,
             reagent_used=reagent,
-        ).dict(exclude_none=True)
+        ).model_dump(exclude_none=True)
 
     if target_p_mg_l >= initial_p_mg_l:
         return CalculatePhosphorusRemovalDoseOutput(
@@ -993,7 +1121,7 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
             error_message=f"Target P ({target_p_mg_l} mg/L) must be less than initial P ({initial_p_mg_l} mg/L)",
             strategy_used=strategy_name,
             reagent_used=reagent,
-        ).dict(exclude_none=True)
+        ).model_dump(exclude_none=True)
 
     # Inert P accounting: adjust effective target for non-reactive P
     p_inert = input_model.p_inert_soluble_mg_l
@@ -1008,7 +1136,7 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
             ),
             strategy_used=strategy_name,
             reagent_used=reagent,
-        ).dict(exclude_none=True)
+        ).model_dump(exclude_none=True)
 
     effective_target_p = target_p_mg_l - p_inert
     if effective_target_p < 0:
@@ -1020,7 +1148,7 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
             ),
             strategy_used=strategy_name,
             reagent_used=reagent,
-        ).dict(exclude_none=True)
+        ).model_dump(exclude_none=True)
 
     if p_inert > 0:
         logger.info(
@@ -1037,6 +1165,40 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
     except Exception as e:
         logger.warning(f"Database resolution failed, using default: {e}")
         database_path = database_manager.resolve_and_validate_database("minteq.v4.dat", category="general")
+
+    # Remap iron strategy phases to database-specific names
+    # Track phases dropped during remapping so the validator can warn about them
+    iron_phases_dropped: List[str] = []
+    if strategy_name == "iron" and database_path:
+        import os as _os
+
+        from utils.ferric_phases import get_phase_name
+
+        db_basename = _os.path.basename(database_path)
+        for phases_key in ("phases_aerobic", "phases_anaerobic"):
+            if phases_key in strategy_config:
+                remapped = []
+                for phase in strategy_config[phases_key]:
+                    # Map canonical phase names to database-specific names
+                    if phase == "Ferrihydrite":
+                        mapped = get_phase_name("ferric_hydroxide", db_basename)
+                    elif phase == "Strengite":
+                        mapped = get_phase_name("ferric_phosphate", db_basename)
+                    elif phase == "Vivianite":
+                        mapped = get_phase_name("ferrous_phosphate", db_basename)
+                    elif phase == "FeS(ppt)":
+                        mapped = get_phase_name("iron_sulfide", db_basename)
+                    elif phase == "Siderite":
+                        mapped = get_phase_name("iron_carbonate", db_basename)
+                    else:
+                        mapped = phase
+                    if mapped:
+                        remapped.append(mapped)
+                    else:
+                        iron_phases_dropped.append(phase)
+                        logger.warning(f"Phase '{phase}' not available in {db_basename}, skipping")
+                strategy_config[phases_key] = remapped
+        logger.info(f"Remapped iron phases for {db_basename}: aerobic={strategy_config.get('phases_aerobic')}")
 
     # Build inline blocks if needed
     inline_phreeqc_prefix = ""
@@ -1059,8 +1221,32 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
 
     # Get phases for this strategy (use allowed_phases override if provided)
     if strategy_spec.allowed_phases:
-        # User specified custom phases - use those (preserve default competing phases like Calcite)
+        # User specified custom phases - remap to database-compatible names for iron strategy
         phases = list(strategy_spec.allowed_phases)
+        if strategy_name == "iron" and database_path:
+            import os as _os2
+
+            from utils.ferric_phases import get_phase_name as _get_phase
+
+            _db_base = _os2.path.basename(database_path)
+            _phase_map = {
+                "Ferrihydrite": "ferric_hydroxide",
+                "Strengite": "ferric_phosphate",
+                "Vivianite": "ferrous_phosphate",
+                "FeS(ppt)": "iron_sulfide",
+                "Siderite": "iron_carbonate",
+            }
+            remapped_phases = []
+            for p in phases:
+                if p in _phase_map:
+                    mapped = _get_phase(_phase_map[p], _db_base)
+                    if mapped:
+                        remapped_phases.append(mapped)
+                    else:
+                        logger.warning(f"Phase '{p}' not available in {_db_base}, skipping")
+                else:
+                    remapped_phases.append(p)
+            phases = remapped_phases
         # Add Calcite if not already present (common competing sink)
         if "Calcite" not in phases:
             phases.append("Calcite")
@@ -1089,6 +1275,24 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
 
         logger.info(f"Background sinks enabled: added {background_phases}")
         warnings.append(f"Background sinks enabled: {background_phases}. " "P removal may occur via multiple pathways.")
+
+    # Step 4.7: Validate strategy-database compatibility
+    validation_warnings = validate_strategy_database_compatibility(
+        strategy_name, phases, database_path, inline_phreeqc_prefix, is_aerobic,
+        phases_dropped_during_remap=iron_phases_dropped if strategy_name == "iron" else None,
+    )
+    warnings.extend(validation_warnings)
+
+    # Check for fatal incompatibility
+    fatal = [w for w in validation_warnings if w.startswith("FATAL:")]
+    if fatal:
+        return CalculatePhosphorusRemovalDoseOutput(
+            status="infeasible",
+            error_message=fatal[0],
+            strategy_used=strategy_name,
+            reagent_used=reagent,
+            warnings=warnings,
+        ).model_dump(exclude_none=True)
 
     # Step 4.6: Handle sulfide sensitivity sweep for anaerobic iron (Issue 1/9)
     # If sulfide_sensitivity=True and no explicit S(-2), run the sweep and return results
@@ -1162,7 +1366,7 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
             recommended_design_dose_mg_l=recommended_dose_mg_l,
             recommended_design_basis=design_basis,
             warnings=warnings if warnings else None,
-        ).dict(exclude_none=True)
+        ).model_dump(exclude_none=True)
 
     # Step 5: Run binary search optimization
     # Use effective_target_p (accounts for inert P) in binary search
@@ -1351,7 +1555,7 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
             strategy_used=strategy_name,
             reagent_used=reagent,
             warnings=warnings if warnings else None,
-        ).dict(exclude_none=True)
+        ).model_dump(exclude_none=True)
 
     # Calculate mg/L dose
     metal_atoms = reagent_info.get("metal_atoms", 1)
@@ -1442,7 +1646,7 @@ async def calculate_phosphorus_removal_dose(input_data: Dict[str, Any]) -> Dict[
         dose_response_curve=dose_response_data if len(dose_response_data) >= 3 else None,
         redox_diagnostics=redox_diagnostics,
         warnings=warnings if warnings else None,
-    ).dict(exclude_none=True)
+    ).model_dump(exclude_none=True)
 
 
 # =============================================================================
@@ -1715,10 +1919,13 @@ async def _run_p_removal_simulation(
     if surface_name:
         # Determine which phase to link surface to
         if surface_name == "Hfo":
-            # Link to Ferrihydrite for iron coagulants
-            phase_for_surface = "Ferrihydrite"
-            if phase_for_surface not in phases:
-                phase_for_surface = "Fe(OH)3(a)" if "Fe(OH)3(a)" in phases else None
+            # Link to the iron hydroxide phase present in the phases list
+            # (phase names were already remapped for database compatibility)
+            phase_for_surface = None
+            for candidate in ("Ferrihydrite", "Fe(OH)3(a)", "Goethite", "Fe(OH)3"):
+                if candidate in phases:
+                    phase_for_surface = candidate
+                    break
         elif surface_name == "Hao":
             # Link to Gibbsite for aluminum coagulants
             phase_for_surface = "Gibbsite"
@@ -1749,6 +1956,9 @@ async def _run_p_removal_simulation(
                 phreeqc_input_parts.append(surface_block)
                 logger.debug(f"Added {surface_name} surface block linked to {phase_for_surface}")
 
+    # Save the reacted solution so parse_phreeqc_results can read it
+    phreeqc_input_parts.append("SAVE solution 2")
+
     # Build selected output with USER_PUNCH for partitioning (Issue 5)
     selected_output = build_selected_output_block(user_punch=extract_partitioning)
     phreeqc_input_parts.append(selected_output)
@@ -1770,8 +1980,8 @@ async def _run_p_removal_simulation(
         )
         phreeqc_input_parts.append(user_punch)
 
-    # Combine input
-    phreeqc_input = "\nEND\n".join(phreeqc_input_parts) + "\nEND\n"
+    # Combine input — all blocks in a single simulation step
+    phreeqc_input = "\n".join(phreeqc_input_parts) + "\nEND\n"
 
     # Run simulation
     try:

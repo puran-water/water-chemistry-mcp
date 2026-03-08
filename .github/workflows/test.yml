@@ -14,7 +14,6 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12"]
         exclude:
-          # Exclude some combinations to reduce CI load
           - os: macos-latest
             python-version: "3.10"
 
@@ -30,103 +29,53 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
         restore-keys: |
           ${{ runner.os }}-pip-
 
-    - name: Install dependencies
+    - name: Install package with dev dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov pytest-asyncio
+        pip install -e ".[dev]"
 
-    - name: Create test databases directory (Unix)
-      if: runner.os != 'Windows'
-      run: mkdir -p databases/official
-
-    - name: Create test databases directory (Windows)
-      if: runner.os == 'Windows'
-      run: New-Item -ItemType Directory -Path databases/official -Force
-      shell: pwsh
-
-    - name: Download test databases (Linux/MacOS)
-      if: runner.os != 'Windows'
+    - name: Verify import and database resolution
+      env:
+        PHREEQC_DATABASE: ${{ github.workspace }}/databases/official
       run: |
-        cd databases/official
-        # Download minimal test databases
-        curl -L -o minteq.dat "https://www.usgs.gov/media/files/minteq-v4-thermodynamic-database"
-        curl -L -o phreeqc.dat "https://www.usgs.gov/media/files/phreeqc-thermodynamic-database"
-      continue-on-error: true
-
-    - name: Download test databases (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        cd databases/official
-        # Download minimal test databases
-        Invoke-WebRequest -Uri "https://www.usgs.gov/media/files/minteq-v4-thermodynamic-database" -OutFile "minteq.dat"
-        Invoke-WebRequest -Uri "https://www.usgs.gov/media/files/phreeqc-thermodynamic-database" -OutFile "phreeqc.dat"
-      shell: pwsh
-      continue-on-error: true
+        python -c "
+        from server import main
+        from utils.import_helpers import get_available_database_paths, PHREEQPYTHON_AVAILABLE
+        print(f'PhreeqPython available: {PHREEQPYTHON_AVAILABLE}')
+        paths = get_available_database_paths()
+        print(f'Found {len(paths)} databases')
+        for p in paths[:5]:
+            print(f'  {p}')
+        assert PHREEQPYTHON_AVAILABLE, 'PhreeqPython must be available'
+        assert any('minteq.v4.dat' in p for p in paths), 'minteq.v4.dat must be discoverable'
+        "
 
     - name: Run linting
       run: |
         python -m flake8 tools/ utils/ --count --select=E9,F63,F7,F82 --show-source --statistics
-        python -m flake8 tools/ utils/ --count --max-complexity=10 --max-line-length=120 --statistics
       continue-on-error: true
-
-    - name: Run type checking
-      run: |
-        python -m mypy tools/ utils/ --ignore-missing-imports
-      continue-on-error: true
-
-    - name: Verify database files exist (Unix)
-      if: runner.os != 'Windows'
-      run: |
-        echo "Checking for PHREEQC databases..."
-        ls -la databases/official/
-        python -c "import os; print('phreeqc.dat exists:', os.path.exists('databases/official/phreeqc.dat'))"
-
-    - name: Verify database files exist (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        Write-Host "Checking for PHREEQC databases..."
-        Get-ChildItem databases\official
-        python -c "import os; print('phreeqc.dat exists:', os.path.exists('databases/official/phreeqc.dat'))"
-      shell: pwsh
 
     - name: Run unit tests
-      continue-on-error: true
       env:
-        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
-        PHREEQC_DATABASE_DIR: ${{ github.workspace }}/databases/official
+        PHREEQC_DATABASE: ${{ github.workspace }}/databases/official
       run: |
-        python -m pytest tests/ -v --cov=tools --cov=utils --cov-report=xml --cov-report=html || true
+        python -m pytest tests/ -v --cov=tools --cov=utils --cov-report=xml --cov-report=html
 
-    - name: Test MCP server startup
-      env:
-        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
-        PHREEQC_DATABASE_DIR: ${{ github.workspace }}/databases/official
-      run: |
-        timeout 30s python server.py --test || true
-      shell: bash
-      continue-on-error: true
-
-    - name: Test individual tools
-      env:
-        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
-        PHREEQC_DATABASE_DIR: ${{ github.workspace }}/databases/official
+    - name: Test tool imports
       run: |
         python -c "
         import sys
         sys.path.append('.')
-        try:
-            from tools.chemical_addition import simulate_chemical_addition
-            from tools.solution_speciation import calculate_solution_speciation
-            from tools.scaling_potential import predict_scaling_potential
-            print('[PASS] All tools import successfully')
-        except Exception as e:
-            print(f'[FAIL] Import error: {e}')
-            sys.exit(1)
+        from tools.chemical_addition import simulate_chemical_addition
+        from tools.solution_speciation import calculate_solution_speciation
+        from tools.scaling_potential import predict_scaling_potential
+        from tools.phosphorus_removal import calculate_phosphorus_removal_dose
+        from tools.dosing_requirement import calculate_dosing_requirement
+        print('[PASS] All tools import successfully')
         "
 
     - name: Upload coverage reports
@@ -145,4 +94,3 @@ jobs:
         path: |
           htmlcov/
           coverage.xml
-          pytest-report.xml

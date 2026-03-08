@@ -2,10 +2,9 @@
 Tool for simulating chemical additions to a solution.
 """
 
-import asyncio
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from utils.database_management import database_manager
 
@@ -13,20 +12,10 @@ try:
     from utils.mass_balance import add_mass_balance_to_output
 except ImportError:
     add_mass_balance_to_output = None
-from utils.amorphous_phases import get_amorphous_phases_for_system
-from utils.helpers import (
-    build_equilibrium_phases_block,
-    build_reaction_block,
-    build_selected_output_block,
-    build_solution_block,
-)
 
-from .phreeqc_wrapper import (
-    PhreeqcError,
-    run_phreeqc_simulation,
-    run_phreeqc_simulation_with_precipitation,
-    run_phreeqc_with_phreeqpython,
-)
+from utils.exceptions import PhreeqcError
+
+from .phreeqc import run_phreeqc_with_phreeqpython
 from .schemas import SimulateChemicalAdditionInput, SimulateChemicalAdditionOutput
 
 logger = logging.getLogger(__name__)
@@ -117,7 +106,7 @@ async def simulate_chemical_addition(input_data: Dict[str, Any]) -> Dict[str, An
                 # Use PHREEQC's native KINETICS blocks with phreeqc_rates.dat
                 logger.info("Using PHREEQC's native kinetic rates database")
 
-                from .phreeqc_wrapper import calculate_kinetic_precipitation_phreeqc_native
+                from .phreeqc import calculate_kinetic_precipitation_phreeqc_native
 
                 # Run kinetic calculation with PHREEQC native approach
                 results = await calculate_kinetic_precipitation_phreeqc_native(
@@ -147,7 +136,7 @@ async def simulate_chemical_addition(input_data: Dict[str, Any]) -> Dict[str, An
                 # Now run kinetic precipitation calculation
                 from phreeqpython import PhreeqPython
 
-                from .phreeqc_wrapper import calculate_kinetic_precipitation
+                from .phreeqc import calculate_kinetic_precipitation
 
                 # Create PhreeqPython instance
                 pp = PhreeqPython(database=database_path if database_path else "phreeqc.dat")

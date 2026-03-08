@@ -10,7 +10,6 @@ Test categories:
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch
 
 # Import modules to test
 from utils.inline_phases import (
@@ -18,7 +17,6 @@ from utils.inline_phases import (
     get_variscite_phases_block,
     get_hao_surface_block,
     get_p_removal_inline_blocks,
-    check_phases_in_database,
     build_hao_phase_linked_surface_block,
 )
 
@@ -32,7 +30,7 @@ from tools.schemas_ferric import (
     SulfideSensitivityScenario,
 )
 
-from tools.phreeqc_wrapper import get_engine_status
+from tools.phreeqc import get_engine_status
 
 
 # =============================================================================
@@ -719,7 +717,7 @@ class TestInertPAccounting:
         from tools.phosphorus_removal import CalculatePhosphorusRemovalDoseInput
 
         # Check field exists and has default
-        schema = CalculatePhosphorusRemovalDoseInput.schema()
+        schema = CalculatePhosphorusRemovalDoseInput.model_json_schema()
         props = schema.get("properties", {})
         assert "p_inert_soluble_mg_l" in props
 
@@ -769,7 +767,7 @@ class TestAllowedPhasesOverride:
         """Test allowed_phases field exists in strategy schema."""
         from tools.phosphorus_removal import PhosphorusRemovalStrategy
 
-        schema = PhosphorusRemovalStrategy.schema()
+        schema = PhosphorusRemovalStrategy.model_json_schema()
         props = schema.get("properties", {})
         assert "allowed_phases" in props
 
@@ -805,7 +803,7 @@ class TestSulfideSensitivityInput:
         """Test sulfide_sensitivity field exists in input schema."""
         from tools.phosphorus_removal import CalculatePhosphorusRemovalDoseInput
 
-        schema = CalculatePhosphorusRemovalDoseInput.schema()
+        schema = CalculatePhosphorusRemovalDoseInput.model_json_schema()
         props = schema.get("properties", {})
         assert "sulfide_sensitivity" in props
 
@@ -856,7 +854,7 @@ class TestHfoSiteMultiplier:
         """Test hfo_site_multiplier field exists in input schema."""
         from tools.phosphorus_removal import CalculatePhosphorusRemovalDoseInput
 
-        schema = CalculatePhosphorusRemovalDoseInput.schema()
+        schema = CalculatePhosphorusRemovalDoseInput.model_json_schema()
         props = schema.get("properties", {})
         assert "hfo_site_multiplier" in props
 
@@ -918,7 +916,7 @@ class TestSulfideSensitivitySweepOutput:
         """Test output schema has sulfide sweep result fields."""
         from tools.phosphorus_removal import CalculatePhosphorusRemovalDoseOutput
 
-        schema = CalculatePhosphorusRemovalDoseOutput.schema()
+        schema = CalculatePhosphorusRemovalDoseOutput.model_json_schema()
         props = schema.get("properties", {})
 
         # Check all sweep-related fields exist

@@ -16,6 +16,7 @@ Exception Hierarchy:
     │   └── DatabaseQueryError
     ├── FeatureNotSupportedError
     ├── PhreeqcSimulationError
+    ├── PhreeqcError (low-level PHREEQC execution failure)
     ├── ConvergenceError
     │   ├── DosingConvergenceError
     │   └── OptimizationConvergenceError
@@ -30,7 +31,31 @@ Exception Hierarchy:
     └── BatchSimulationError
 """
 
+import os
+from enum import Enum
 from typing import Any, Dict, List, Optional
+
+
+class ErrorType(str, Enum):
+    """Centralized error type identifiers for structured error reporting.
+
+    Using str+Enum so ErrorType.MAX_ITERATIONS == "max_iterations" is True,
+    keeping backward compatibility with existing string comparisons.
+    """
+
+    WATER_ACTIVITY_CONVERGENCE = "water_activity_convergence"
+    DATABASE_NOT_FOUND = "database_not_found"
+    UNKNOWN_SIMULATION_ERROR = "unknown_simulation_error"
+    RESULT_PARSING_ERROR = "result_parsing_error"
+    EMPTY_RESULTS = "empty_results"
+    MISSING_TARGET_PARAMETER = "missing_target_parameter"
+    BOUNDS_CONVERGENCE = "bounds_convergence"
+    ITERATION_STALLED = "iteration_stalled"
+    PHREEQC_SIMULATION_ERROR = "phreeqc_simulation_error"
+    MAX_ITERATIONS = "max_iterations"
+    DATABASE_QUERY_ERROR = "database_query_error"
+    DOSING_CONVERGENCE_ERROR = "dosing_convergence_error"
+    BATCH_SIMULATION_ERROR = "batch_simulation_error"
 
 
 class WaterChemistryError(Exception):
@@ -40,7 +65,12 @@ class WaterChemistryError(Exception):
     allowing for broad exception handling when needed.
     """
 
-    pass
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the exception to a dictionary for API responses."""
+        return {
+            "error_type": self.__class__.__name__,
+            "message": str(self),
+        }
 
 
 class InputValidationError(WaterChemistryError):
@@ -215,7 +245,7 @@ class DosingConvergenceError(ConvergenceError):
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for structured error reporting."""
         return {
-            "error_type": "dosing_convergence_error",
+            "error_type": ErrorType.DOSING_CONVERGENCE_ERROR,
             "last_dose": self.last_dose,
             "target_param": self.target_param,
             "target_value": self.target_value,
@@ -432,9 +462,89 @@ class BatchSimulationError(WaterChemistryError):
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for structured error reporting."""
         return {
-            "error_type": "batch_simulation_error",
+            "error_type": ErrorType.BATCH_SIMULATION_ERROR,
             "failed_scenarios": self.failed_scenarios,
             "errors": self.errors,
             "completed_scenarios": self.completed_scenarios,
             "message": str(self),
+        }
+
+
+class PhreeqcError(WaterChemistryError):
+    """Low-level PHREEQC execution failure with enhanced diagnostic information.
+
+    Raised when VIPhreeqc.run_string() encounters errors during simulation.
+    Contains the PHREEQC input excerpt, database info, and mineral context
+    for debugging.
+
+    Distinct from PhreeqcSimulationError which is a higher-level simulation
+    logic failure raised by tool modules.
+
+    Attributes:
+        message: Error message.
+        phreeqc_errors: PHREEQC-specific error messages.
+        database: Database used in the simulation.
+        minerals: Minerals involved in the simulation.
+        input_excerpt: Excerpt of the PHREEQC input that caused the error.
+        context: Additional context for debugging.
+    """
+
+    def __init__(self, message, phreeqc_errors=None, database=None, minerals=None, input_excerpt=None, context=None):
+        self.message = message
+        self.phreeqc_errors = phreeqc_errors
+        self.database = database
+        self.minerals = minerals or []
+        self.input_excerpt = input_excerpt
+        self.context = context or {}
+
+        # Check for water activity non-convergence errors
+        self.is_water_activity_error = False
+        if (
+            phreeqc_errors
+            and "activity of water" in phreeqc_errors.lower()
+            and "not converged" in phreeqc_errors.lower()
+        ):
+            self.is_water_activity_error = True
+            if not self.context:
+                self.context = {}
+            self.context["error_type"] = ErrorType.WATER_ACTIVITY_CONVERGENCE
+
+        # Create a detailed error message
+        detailed_msg = [message]
+
+        if phreeqc_errors:
+            detailed_msg.append(f"PHREEQC errors: {phreeqc_errors}")
+
+        if database:
+            detailed_msg.append(f"Database: {os.path.basename(database)}")
+
+        if minerals and len(minerals) > 0:
+            if len(minerals) <= 5:
+                detailed_msg.append(f"Minerals: {', '.join(minerals)}")
+            else:
+                detailed_msg.append(f"Minerals: {', '.join(minerals[:5])} (and {len(minerals)-5} more)")
+
+        if input_excerpt:
+            if len(input_excerpt) > 500:
+                excerpt_truncated = input_excerpt[:250] + "\n...\n" + input_excerpt[-250:]
+                detailed_msg.append(f"Input excerpt: \n{excerpt_truncated}")
+            else:
+                detailed_msg.append(f"Input excerpt: \n{input_excerpt}")
+
+        if context:
+            context_str = ", ".join(f"{k}={v}" for k, v in context.items())
+            detailed_msg.append(f"Context: {context_str}")
+
+        super().__init__("\n".join(detailed_msg))
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the exception to a dictionary for API responses."""
+        return {
+            "error_type": ErrorType.PHREEQC_SIMULATION_ERROR,
+            "message": self.message,
+            "phreeqc_errors": self.phreeqc_errors,
+            "database": os.path.basename(self.database) if self.database else None,
+            "minerals": self.minerals[:5] if self.minerals and len(self.minerals) > 0 else None,
+            "minerals_count": len(self.minerals) if self.minerals else 0,
+            "context": self.context,
         }

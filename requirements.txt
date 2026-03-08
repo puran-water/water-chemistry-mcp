@@ -1,20 +1,4 @@
-pydantic>=2.0.0
-phreeqpython>=1.4.0
-mcp>=1.0.0
-fastapi>=0.100.0
-typing-extensions>=4.0.0
-papermill>=2.5.0
-nbformat>=5.9.0
-nbconvert>=7.11.0
-jupyter>=1.0.0
-numpy>=1.21.0
-scipy>=1.10.0  # Required by phreeqpython (undeclared dependency)
-requests>=2.25.0
-
-# Development dependencies (optional)
-# black>=22.0
-# flake8>=4.0
-# mypy>=0.900
-# pytest>=6.0
-# pytest-asyncio>=0.18
-# pytest-cov>=3.0
+# This file is maintained for compatibility.
+# The single source of truth for dependencies is pyproject.toml.
+# Install with: pip install -e ".[dev]"
+-e ".[dev]"

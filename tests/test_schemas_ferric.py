@@ -10,13 +10,11 @@ Tests:
 
 import pytest
 import sys
-import math
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tools.schemas_ferric import (
-    MOLECULAR_WEIGHTS,
     mg_l_to_mmol,
     mmol_to_mg_l,
     orp_to_pe,

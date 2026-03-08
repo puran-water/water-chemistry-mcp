@@ -8,10 +8,10 @@ including their sources, versions, and download URLs.
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Union
 
 # Path constants
-from .database_downloader import CACHED_DIR, CUSTOM_DIR, DATABASE_DIR, METADATA_DIR, OFFICIAL_DIR
+from .database_downloader import METADATA_DIR
 
 logger = logging.getLogger(__name__)
 

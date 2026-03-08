@@ -39,7 +39,7 @@ AI agent with access to Water Chemistry MCP Server for industrial wastewater tre
 - **Comprehensive precipitation modeling** - Full database mineral lists by default
 - **Smart optimization bounds** - Stoichiometry used internally for efficient search ranges
 - **Technical focus** - No economic estimates, purely scientific results
-- **USGS PHREEQC support** - Subprocess mode for full USGS database compatibility
+- **PHREEQC Subprocess support** - Subprocess mode for full database compatibility
 
 ## Core Tools
 

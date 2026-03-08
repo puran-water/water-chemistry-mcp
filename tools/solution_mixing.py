@@ -2,12 +2,9 @@
 Tool for simulating the mixing of multiple solutions.
 """
 
-import asyncio
 import logging
-import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
-from utils.constants import DEFAULT_MINERALS
 from utils.database_management import database_manager
 from utils.helpers import (
     build_equilibrium_phases_block,
@@ -16,7 +13,9 @@ from utils.helpers import (
     build_solution_block,
 )
 
-from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
+from utils.exceptions import PhreeqcError
+
+from .phreeqc import run_phreeqc_simulation
 from .schemas import SimulateSolutionMixingInput, SimulateSolutionMixingOutput
 
 logger = logging.getLogger(__name__)
@@ -53,33 +52,19 @@ async def simulate_solution_mixing(input_data: Dict[str, Any]) -> Dict[str, Any]
 
         # Determine whether we're using explicit volumes or fractions
         any_volume = any(getattr(s, "volume_L", None) is not None for s in solutions_input)
-        any_fraction = any(getattr(s, "fraction", None) is not None for s in solutions_input)
-        # Back-compat: if only legacy field present
-        if not any_volume and not any_fraction:
-            any_fraction = any(
-                getattr(s, "fraction_or_volume", None) is not None or getattr(s, "volume_fraction", None) is not None
-                for s in solutions_input
-            )
 
         # Build solution blocks and compute weights
-        raw_weights = []  # raw numbers (volumes or fractions)
+        raw_weights = []
         for i, sol_input in enumerate(solutions_input):
             sol_num = i + 1
             phreeqc_input += build_solution_block(
                 sol_input.solution.model_dump(exclude_defaults=True), solution_num=sol_num
             )
 
-            # Prefer explicit fields
             if any_volume:
                 w = getattr(sol_input, "volume_L", None)
             else:
-                # Fractions: new field or legacy
                 w = getattr(sol_input, "fraction", None)
-                if w is None:
-                    # Legacy support
-                    w = getattr(sol_input, "fraction_or_volume", None)
-                    if w is None:
-                        w = getattr(sol_input, "volume_fraction", None)
             raw_weights.append(w)
 
         # If all weights missing for fractions, default to equal

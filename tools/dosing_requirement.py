@@ -4,22 +4,22 @@ Tool for calculating dosing requirements using binary search.
 FAIL LOUDLY: This module raises typed exceptions on errors.
 No silent fallbacks or returning {"error": ...} patterns.
 
-Uses raw PHREEQC strings via phreeqc_wrapper for full database compatibility
-with USGS PHREEQC databases (minteq.dat, phreeqc.dat, etc.).
+Uses raw PHREEQC strings via tools.phreeqc for full database compatibility.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from utils.database_management import database_manager
 from utils.exceptions import (
     DosingConvergenceError,
+    ErrorType,
     InputValidationError,
     PhreeqcSimulationError,
 )
 from utils.helpers import build_solution_block
 
-from .phreeqc_wrapper import find_reactant_dose_for_target
+from .phreeqc import find_reactant_dose_for_target
 from .schemas import (
     CalculateDosingRequirementInput,
     CalculateDosingRequirementOutput,
@@ -34,7 +34,7 @@ async def calculate_dosing_requirement(input_data: Dict[str, Any]) -> Dict[str, 
     Calculate the required dose of a reagent to achieve a target condition.
 
     Uses raw PHREEQC strings via find_reactant_dose_for_target for full
-    database compatibility with USGS PHREEQC databases.
+    database compatibility.
 
     Args:
         input_data: Dictionary containing:
@@ -179,12 +179,23 @@ async def calculate_dosing_requirement(input_data: Dict[str, Any]) -> Dict[str, 
 
     # Check for convergence
     if optimal_dose is None:
+        # Extract rich error metadata from final_results if available
+        error_type = final_results.get("error_type", "unknown") if isinstance(final_results, dict) else "unknown"
+        context = final_results.get("context", {}) if isinstance(final_results, dict) else {}
+        achieved_value = context.get("achieved_value") if isinstance(context, dict) else None
+
+        if error_type in (ErrorType.PHREEQC_SIMULATION_ERROR, ErrorType.MISSING_TARGET_PARAMETER):
+            raise PhreeqcSimulationError(
+                f"Dosing calculation failed ({error_type}): "
+                f"{context.get('message', 'PHREEQC simulation error during dose search')}"
+            )
+
         raise DosingConvergenceError(
-            f"Binary search did not converge after {iterations} iterations",
+            f"Binary search did not converge after {iterations} iterations ({error_type})",
             last_dose=initial_guess,
             target_param=target_parameter,
             target_value=target_value,
-            achieved_value=None,
+            achieved_value=achieved_value,
             iterations=iterations,
             tolerance=tolerance,
         )

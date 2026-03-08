@@ -59,9 +59,8 @@ async def test_small_ph_adjustment():
     print_results(result)
     
     # Validate the result
-    success = validate_result(result, expected_success=True)
+    validate_result(result, expected_success=True)
     
-    return success
 
 async def test_large_ph_adjustment():
     """Test a large pH adjustment that would have failed to converge previously."""
@@ -106,9 +105,8 @@ async def test_large_ph_adjustment():
     print_results(result)
     
     # Validate the result
-    success = validate_result(result, expected_success=True)
+    validate_result(result, expected_success=True)
     
-    return success
 
 async def test_high_alkalinity_challenge():
     """Test with high alkalinity that would challenge convergence.
@@ -160,7 +158,6 @@ async def test_high_alkalinity_challenge():
         await calculate_dosing_requirement(input_data)
 
     print("DosingConvergenceError raised as expected - FAIL LOUDLY working correctly")
-    return True
 
 async def test_with_precipitation():
     """Test with precipitation enabled to check mineral interactions."""
@@ -205,9 +202,8 @@ async def test_with_precipitation():
     print_results(result)
     
     # Validate the result - with precipitation, we might not get exact convergence
-    success = validate_result(result, expected_success=True, tolerance_check=False)
+    validate_result(result, expected_success=True, tolerance_check=False)
     
-    return success
 
 def print_results(result):
     """Print the results in a readable format."""
@@ -249,54 +245,44 @@ def print_results(result):
                     print(f"  {mineral}: {si}")
 
 def validate_result(result, expected_success=True, tolerance_check=True):
-    """Validate the result based on expectations."""
+    """Validate the result based on expectations. Raises AssertionError on failure."""
     # Check for errors first
     if "error" in result and result["error"]:
         if expected_success:
-            print(f"FAILED: Expected success but got error: {result['error']}")
-            return False
+            raise AssertionError(f"Expected success but got error: {result['error']}")
         else:
             print("PASSED: Expected error condition met")
-            return True
-    
+            return
+
     # If we expected an error but didn't get one
     if not expected_success and "error" not in result:
-        print("FAILED: Expected error but got success")
-        return False
-    
+        raise AssertionError("Expected error but got success")
+
     # Check required fields
     required_fields = ["required_dose_mmol_per_L", "convergence_status", "iterations_taken", "final_state"]
     for field in required_fields:
-        if field not in result:
-            print(f"FAILED: Missing required field '{field}' in result")
-            return False
-    
+        assert field in result, f"Missing required field '{field}' in result"
+
     # Check that the target parameter was reached within tolerance
     if tolerance_check and "final_state" in result and "solution_summary" in result["final_state"]:
-        # Extract target parameter and value from input_data
-        target_param = "pH"  # Assuming pH for these tests
+        target_param = "pH"
         target_value = None
-        
-        # For the dosing tests we're using pH as the target
+
         if "target_condition" in result and "value" in result["target_condition"]:
             target_value = result["target_condition"]["value"]
-        
-        # Get final value
+
         final_value = None
         if target_param.lower() == "ph" and "pH" in result["final_state"]["solution_summary"]:
             final_value = result["final_state"]["solution_summary"]["pH"]
-        
-        # Compare if we have both values
+
         if target_value is not None and final_value is not None:
             diff = abs(final_value - target_value)
-            tolerance = 0.1  # A reasonable tolerance for pH
-            
-            if diff > tolerance:
-                print(f"FAILED: Target {target_param} not reached. Target: {target_value}, Final: {final_value}, Diff: {diff}")
-                return False
-    
+            tolerance = 0.1
+            assert diff <= tolerance, (
+                f"Target {target_param} not reached. Target: {target_value}, Final: {final_value}, Diff: {diff}"
+            )
+
     print("PASSED: All validation checks succeeded")
-    return True
 
 async def run_all_tests():
     """Run all tests and report results."""

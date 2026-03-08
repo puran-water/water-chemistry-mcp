@@ -2,14 +2,15 @@
 Tool for calculating solution speciation and equilibrium.
 """
 
-import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from utils.database_management import database_manager
 from utils.helpers import build_selected_output_block, build_solution_block
 
-from .phreeqc_wrapper import PhreeqcError, run_phreeqc_simulation
+from utils.exceptions import PhreeqcError
+
+from .phreeqc import run_phreeqc_simulation
 from .schemas import CalculateSolutionSpeciationInput, CalculateSolutionSpeciationOutput
 
 logger = logging.getLogger(__name__)

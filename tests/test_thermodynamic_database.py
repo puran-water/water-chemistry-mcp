@@ -28,35 +28,29 @@ async def test_phreeqc_database_path():
     
     print("\n===== TEST 1: PHREEQC DATABASE PATH RESOLUTION =====")
     
-    # Get all potential database paths from import_helpers
-    print("Available database paths in import_helpers:")
-    for path in import_helpers.USGS_PHREEQC_DATABASE_PATHS:
+    # Get all available database paths
+    print("Available database paths:")
+    for path in import_helpers.get_available_database_paths():
         exists = os.path.exists(path)
         print(f"  {path} - Exists: {exists}")
     
-    # Try to get phreeqc.dat path using database_management
-    try:
-        db_manager = DatabaseManager()
-        phreeqc_path = db_manager.available_databases[0] if db_manager.available_databases else None
-        print(f"Resolved phreeqc.dat path: {phreeqc_path}")
-        print(f"Path exists: {os.path.exists(phreeqc_path)}")
-        
-        # Try to open the file
-        try:
-            with open(phreeqc_path, 'r') as f:
-                lines = f.readlines()[:5]  # Read first 5 lines
-                print(f"First 5 lines of phreeqc.dat:")
-                for line in lines:
-                    print(f"  {line.strip()}")
-            success = True
-        except Exception as e:
-            print(f"Error opening phreeqc.dat: {e}")
-            success = False
-    except Exception as e:
-        print(f"Error getting phreeqc.dat path: {e}")
-        success = False
-    
-    return success
+    # Resolve phreeqc.dat specifically
+    db_manager = DatabaseManager()
+    assert db_manager.available_databases, "No databases found"
+
+    phreeqc_path = next(
+        (db for db in db_manager.available_databases if os.path.basename(db) == "phreeqc.dat"),
+        None,
+    )
+    assert phreeqc_path is not None, "phreeqc.dat not found in available databases"
+    print(f"Resolved phreeqc.dat path: {phreeqc_path}")
+    assert os.path.exists(phreeqc_path), f"phreeqc.dat does not exist at {phreeqc_path}"
+
+    with open(phreeqc_path, "r", encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()[:5]
+        print("First 5 lines of phreeqc.dat:")
+        for line in lines:
+            print(f"  {line.strip()}")
 
 async def test_query_minerals():
     """Test querying minerals (Calcite, Gypsum) from different databases."""
@@ -76,7 +70,7 @@ async def test_query_minerals():
     
     # Check and print results
     print_query_results(result)
-    success1 = validate_query_result(result, "mineral", "Calcite")
+    assert validate_query_result(result, "mineral", "Calcite")
     
     # Try a different mineral (Gypsum)
     input_data["query_term"] = "Gypsum"
@@ -85,29 +79,20 @@ async def test_query_minerals():
     
     # Check and print results
     print_query_results(result)
-    success2 = validate_query_result(result, "mineral", "Gypsum")
+    assert validate_query_result(result, "mineral", "Gypsum")
     
     # Try with a different database (llnl.dat if available)
-    try:
-        db_manager = DatabaseManager()
-        llnl_path = next((db for db in db_manager.available_databases if "llnl.dat" in db.lower()), None)
-        if os.path.exists(llnl_path):
-            input_data["database"] = "llnl.dat"
-            input_data["query_term"] = "Calcite"
-            print("\nQuerying Calcite from llnl.dat...")
-            result = await query_thermodynamic_database(input_data)
-            
-            # Check and print results
-            print_query_results(result)
-            success3 = validate_query_result(result, "mineral", "Calcite")
-        else:
-            print("llnl.dat not found, skipping test")
-            success3 = True
-    except Exception as e:
-        print(f"Error with llnl.dat test: {e}")
-        success3 = True  # Don't fail the overall test if llnl.dat isn't available
-    
-    return success1 and success2 and success3
+    db_manager = DatabaseManager()
+    llnl_path = next((db for db in db_manager.available_databases if "llnl.dat" in db.lower()), None)
+    if llnl_path and os.path.exists(llnl_path):
+        input_data["database"] = "llnl.dat"
+        input_data["query_term"] = "Calcite"
+        print("\nQuerying Calcite from llnl.dat...")
+        result = await query_thermodynamic_database(input_data)
+        print_query_results(result)
+        assert validate_query_result(result, "mineral", "Calcite")
+    else:
+        print("llnl.dat not found, skipping test")
 
 async def test_query_elements():
     """Test querying elements (Ca, Na) from different databases."""
@@ -127,7 +112,7 @@ async def test_query_elements():
     
     # Check and print results
     print_query_results(result)
-    success1 = validate_query_result(result, "element", "Ca")
+    assert validate_query_result(result, "element_info", "Ca")
     
     # Try a different element (Na)
     input_data["query_term"] = "Na"
@@ -136,29 +121,20 @@ async def test_query_elements():
     
     # Check and print results
     print_query_results(result)
-    success2 = validate_query_result(result, "element", "Na")
+    assert validate_query_result(result, "element_info", "Na")
     
     # Try with llnl.dat (if available)
-    try:
-        db_manager = DatabaseManager()
-        llnl_path = next((db for db in db_manager.available_databases if "llnl.dat" in db.lower()), None)
-        if os.path.exists(llnl_path):
-            input_data["database"] = "llnl.dat"
-            input_data["query_term"] = "Ca"
-            print("\nQuerying Ca from llnl.dat...")
-            result = await query_thermodynamic_database(input_data)
-            
-            # Check and print results
-            print_query_results(result)
-            success3 = validate_query_result(result, "element", "Ca")
-        else:
-            print("llnl.dat not found, skipping test")
-            success3 = True
-    except Exception as e:
-        print(f"Error with llnl.dat test: {e}")
-        success3 = True  # Don't fail the overall test if llnl.dat isn't available
-    
-    return success1 and success2 and success3
+    db_manager = DatabaseManager()
+    llnl_path = next((db for db in db_manager.available_databases if "llnl.dat" in db.lower()), None)
+    if llnl_path and os.path.exists(llnl_path):
+        input_data["database"] = "llnl.dat"
+        input_data["query_term"] = "Ca"
+        print("\nQuerying Ca from llnl.dat...")
+        result = await query_thermodynamic_database(input_data)
+        print_query_results(result)
+        assert validate_query_result(result, "element_info", "Ca")
+    else:
+        print("llnl.dat not found, skipping test")
 
 async def test_case_sensitivity():
     """Test handling of case sensitivity in queries."""
@@ -175,29 +151,18 @@ async def test_case_sensitivity():
         {"type": "element", "name": "Ca"}        # proper case
     ]
     
-    success = True
     for case in test_cases:
         input_data = {
             "database": "phreeqc.dat",
             "query_type": case["type"] if case["type"] != "element" else "element_info",
             "query_term": case["name"]
         }
-        
+
         print(f"\nQuerying {case['name']} (type: {case['type']}) from phreeqc.dat...")
         result = await query_thermodynamic_database(input_data)
-        
-        # Print simplified results
-        if "error" in result and result["error"]:
-            print(f"ERROR: {result['error']}")
-            success = False
-        else:
-            print("Query successful")
-            standard_name = case["name"][0].upper() + case["name"][1:].lower() if case["type"] == "mineral" else case["name"].capitalize()
-            if standard_name not in result["results"]:
-                print(f"WARNING: Expected key {standard_name} not found in result")
-                success = False
-    
-    return success
+
+        assert "error" not in result or not result["error"], f"Query failed for {case['name']}: {result.get('error')}"
+        print("Query successful")
 
 async def test_error_recovery():
     """Test error recovery for invalid database paths and missing items.
@@ -220,15 +185,11 @@ async def test_error_recovery():
     result = await query_thermodynamic_database(input_data)
 
     # System falls back to a valid database and returns Calcite data
+    assert "results" in result or "error" in result, "Unexpected result structure from invalid database query"
     if "results" in result:
         print("System fell back to valid database - OK (graceful degradation)")
-        success = True
-    elif "error" in result:
-        print(f"Got error (also acceptable): {result['error']}")
-        success = True
     else:
-        print("Unexpected result structure")
-        success = False
+        print(f"Got error (also acceptable): {result['error']}")
 
     # Try with invalid item name - expect TermNotFoundError (FAIL LOUDLY)
     input_data = {
@@ -244,8 +205,6 @@ async def test_error_recovery():
         await query_thermodynamic_database(input_data)
 
     print("TermNotFoundError raised as expected - FAIL LOUDLY working correctly")
-
-    return success
 
 def print_query_results(result):
     """Print the query results in a readable format."""

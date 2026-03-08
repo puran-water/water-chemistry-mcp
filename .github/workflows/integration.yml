@@ -25,8 +25,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-asyncio
+        pip install -e ".[dev]"
 
     - name: Verify PHREEQC databases exist
       run: |
@@ -46,127 +45,77 @@ jobs:
         fi
 
     - name: Run chemical addition integration tests
-      continue-on-error: true
-      env:
-        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
       run: |
         python -c "
-        import asyncio
-        import sys
-        import os
+        import asyncio, sys, os
         sys.path.append('.')
 
         async def test_chemical_addition():
             from tools.chemical_addition import simulate_chemical_addition
             from tools.schemas import SimulateChemicalAdditionInput, WaterAnalysisInput, ReactantInput
 
-            try:
-                # Use explicit database path from environment
-                db_path = os.path.join(os.environ['USGS_PHREEQC_DATABASE_PATH'], 'phreeqc.dat')
-                input_data = SimulateChemicalAdditionInput(
-                    database=db_path,
-                    reactants=[ReactantInput(amount=1, formula='NaOH')],
-                    initial_solution=WaterAnalysisInput(ph=7, analysis={'Ca': 5, 'Cl': 10})
-                )
-                result = await simulate_chemical_addition(input_data.model_dump())
-                assert 'solution_summary' in result
-                print('[PASS] Chemical addition test passed')
-            except Exception as e:
-                print(f'[FAIL] Chemical addition test failed: {e}')
-                return False
-            return True
+            input_data = SimulateChemicalAdditionInput(
+                database='phreeqc.dat',
+                reactants=[ReactantInput(amount=1, formula='NaOH')],
+                initial_solution=WaterAnalysisInput(ph=7, analysis={'Ca': 5, 'Cl': 10})
+            )
+            result = await simulate_chemical_addition(input_data.model_dump())
+            assert 'solution_summary' in result
+            print('[PASS] Chemical addition test passed')
 
-        success = asyncio.run(test_chemical_addition())
-        sys.exit(0 if success else 1)
+        asyncio.run(test_chemical_addition())
         "
 
     - name: Run scaling potential integration tests
-      continue-on-error: true
-      env:
-        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
       run: |
         python -c "
-        import asyncio
-        import sys
-        import os
+        import asyncio, sys, os
         sys.path.append('.')
 
         async def test_scaling_potential():
             from tools.scaling_potential import predict_scaling_potential
             from tools.schemas import PredictScalingPotentialInput
 
-            try:
-                # Use database from repo
-                db_path = os.path.join(os.environ['USGS_PHREEQC_DATABASE_PATH'], 'phreeqc.dat')
-                print(f'Using database: {db_path}')
-                input_data = PredictScalingPotentialInput(
-                    ph=7.5,
-                    temperature_celsius=25,
-                    analysis={'Ca': 5, 'Mg': 2, 'HCO3': 3, 'SO4': 1, 'Cl': 10, 'Na': 8},
-                    database=db_path
-                )
-                result = await predict_scaling_potential(input_data.model_dump())
-                assert 'scaling_indices' in result
-                print('[PASS] Scaling potential test passed')
-            except Exception as e:
-                print(f'[FAIL] Scaling potential test failed: {e}')
-                import traceback
-                traceback.print_exc()
-                return False
-            return True
+            input_data = PredictScalingPotentialInput(
+                ph=7.5,
+                temperature_celsius=25,
+                analysis={'Ca': 5, 'Mg': 2, 'HCO3': 3, 'SO4': 1, 'Cl': 10, 'Na': 8},
+                database='phreeqc.dat'
+            )
+            result = await predict_scaling_potential(input_data.model_dump())
+            assert 'scaling_indices' in result
+            print('[PASS] Scaling potential test passed')
 
-        success = asyncio.run(test_scaling_potential())
-        sys.exit(0 if success else 1)
+        asyncio.run(test_scaling_potential())
         "
 
     - name: Run solution speciation integration tests
-      continue-on-error: true
-      env:
-        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
       run: |
         python -c "
-        import asyncio
-        import sys
-        import os
+        import asyncio, sys, os
         sys.path.append('.')
 
         async def test_solution_speciation():
             from tools.solution_speciation import calculate_solution_speciation
             from tools.schemas import CalculateSolutionSpeciationInput
 
-            try:
-                # Use database from repo
-                db_path = os.path.join(os.environ['USGS_PHREEQC_DATABASE_PATH'], 'phreeqc.dat')
-                print(f'Using database: {db_path}')
-                input_data = CalculateSolutionSpeciationInput(
-                    ph=7.5,
-                    temperature_celsius=25,
-                    analysis={'Ca': 5, 'Mg': 2, 'HCO3': 3, 'SO4': 1, 'Cl': 10, 'Na': 8},
-                    database=db_path
-                )
-                result = await calculate_solution_speciation(input_data.model_dump())
-                assert 'species_molality' in result
-                print('[PASS] Solution speciation test passed')
-            except Exception as e:
-                print(f'[FAIL] Solution speciation test failed: {e}')
-                import traceback
-                traceback.print_exc()
-                return False
-            return True
+            input_data = CalculateSolutionSpeciationInput(
+                ph=7.5,
+                temperature_celsius=25,
+                analysis={'Ca': 5, 'Mg': 2, 'HCO3': 3, 'SO4': 1, 'Cl': 10, 'Na': 8},
+                database='phreeqc.dat'
+            )
+            result = await calculate_solution_speciation(input_data.model_dump())
+            assert 'species_molality' in result
+            print('[PASS] Solution speciation test passed')
 
-        success = asyncio.run(test_solution_speciation())
-        sys.exit(0 if success else 1)
+        asyncio.run(test_solution_speciation())
         "
 
     - name: Run kinetic modeling integration tests
-      continue-on-error: true
-      env:
-        USGS_PHREEQC_DATABASE_PATH: ${{ github.workspace }}/databases/official
       run: |
         python -c "
-        import asyncio
-        import sys
-        import os
+        import asyncio, sys, os
         sys.path.append('.')
 
         async def test_kinetic_modeling():
@@ -176,42 +125,31 @@ jobs:
                 KineticParameters, PHREEQCKineticParameters
             )
 
-            try:
-                # Use database from repo
-                db_path = os.path.join(os.environ['USGS_PHREEQC_DATABASE_PATH'], 'phreeqc.dat')
-                print(f'Using database: {db_path}')
-                input_data = SimulateChemicalAdditionInput(
-                    database=db_path,
-                    reactants=[ReactantInput(amount=2, formula='Ca(OH)2')],
-                    initial_solution=WaterAnalysisInput(
-                        ph=7,
-                        analysis={'Ca': 5, 'C(4)': 3}
-                    ),
-                    kinetic_parameters=KineticParameters(
-                        time_steps=[0, 60, 300],
-                        enable_kinetics=True,
-                        minerals_kinetic={
-                            'Calcite': PHREEQCKineticParameters(
-                                m0=0, m=1e-6, tol=1e-6, parms=[1, 0.6]
-                            )
-                        },
-                        use_phreeqc_rates=True
-                    )
+            input_data = SimulateChemicalAdditionInput(
+                database='phreeqc.dat',
+                reactants=[ReactantInput(amount=2, formula='Ca(OH)2')],
+                initial_solution=WaterAnalysisInput(
+                    ph=7,
+                    analysis={'Ca': 5, 'C(4)': 3}
+                ),
+                kinetic_parameters=KineticParameters(
+                    time_steps=[0, 60, 300],
+                    enable_kinetics=True,
+                    minerals_kinetic={
+                        'Calcite': PHREEQCKineticParameters(
+                            m0=0, m=1e-6, tol=1e-6, parms=[1, 0.6]
+                        )
+                    },
+                    use_phreeqc_rates=True
                 )
-                result = await simulate_chemical_addition(input_data.model_dump())
-                assert 'kinetic_profiles' in result
-                profile = result['kinetic_profiles'][0]
-                assert len(profile['time_seconds']) >= 2
-                print('[PASS] Kinetic modeling test passed')
-            except Exception as e:
-                print(f'[FAIL] Kinetic modeling test failed: {e}')
-                import traceback
-                traceback.print_exc()
-                return False
-            return True
+            )
+            result = await simulate_chemical_addition(input_data.model_dump())
+            assert 'kinetic_profiles' in result
+            profile = result['kinetic_profiles'][0]
+            assert len(profile['time_seconds']) >= 2
+            print('[PASS] Kinetic modeling test passed')
 
-        success = asyncio.run(test_kinetic_modeling())
-        sys.exit(0 if success else 1)
+        asyncio.run(test_kinetic_modeling())
         "
 
     - name: Upload integration test results
@@ -221,4 +159,3 @@ jobs:
         name: integration-test-results
         path: |
           *.log
-          databases/

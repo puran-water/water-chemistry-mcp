@@ -19,16 +19,13 @@ import sys
 from mcp.server.fastmcp import FastMCP
 
 # MCP BEST PRACTICE: Configure logging to use stderr (NOT stdout, which is the MCP channel)
-# Also use log rotation to prevent unbounded log file growth
-_log_handler = logging.handlers.RotatingFileHandler(
-    "debug.log", maxBytes=5 * 1024 * 1024, backupCount=3  # 5MB per file, 3 backups
-)
+# File handler is deferred to main() to avoid side effects at import time.
 _stderr_handler = logging.StreamHandler(sys.stderr)  # stderr, not stdout!
 
 logging.basicConfig(
     level=logging.INFO,  # INFO for production (DEBUG available via env var)
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[_log_handler, _stderr_handler],
+    handlers=[_stderr_handler],
 )
 
 # Allow DEBUG level via environment variable
@@ -68,7 +65,7 @@ from tools.optimization_tools import (
 from tools.phosphorus_removal import calculate_phosphorus_removal_dose
 
 # NEW: Engine status for diagnostics
-from tools.phreeqc_wrapper import get_engine_status
+from tools.phreeqc import get_engine_status
 from tools.redox_adjustment import simulate_redox_adjustment
 from tools.scaling_potential import predict_scaling_potential
 from tools.solution_mixing import simulate_solution_mixing
@@ -266,7 +263,7 @@ async def get_engine_status_tool(input_data: dict) -> dict:
 
     This tool reports engine readiness for diagnostics:
     - phreeqpython_available: Whether PhreeqPython library is installed
-    - subprocess_mode_available: Whether USGS PHREEQC subprocess is available
+    - subprocess_mode_available: Whether standalone PHREEQC subprocess is available
     - active_engine: Which engine is currently active
     - database_loadability: Which databases can be loaded
     - known_limitations: Known limitations of the current engine
@@ -295,7 +292,15 @@ from utils.database_management import database_manager
 # Log information about available dependencies
 from utils.import_helpers import PHREEQPYTHON_AVAILABLE
 
-if __name__ == "__main__":
+def main():
+    """Entry point for the water-chemistry-mcp server."""
+    # Add rotating file handler at runtime (not at import time)
+    _log_handler = logging.handlers.RotatingFileHandler(
+        "debug.log", maxBytes=5 * 1024 * 1024, backupCount=3
+    )
+    _log_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    logging.getLogger().addHandler(_log_handler)
+
     logger.info("Starting Water Chemistry MCP server...")
     logger.info(f"PhreeqPython available: {PHREEQPYTHON_AVAILABLE}")
 
@@ -309,7 +314,6 @@ if __name__ == "__main__":
         if available_dbs:
             logger.info(f"Found {len(available_dbs)} available database files:")
             for i, db_path in enumerate(available_dbs[:5]):
-                # Get additional info about the database
                 db_info = database_manager.get_database_info(db_path)
                 features = ", ".join([f for f, enabled in db_info.get("features", {}).items() if enabled])
                 logger.info(
@@ -325,34 +329,13 @@ if __name__ == "__main__":
     else:
         logger.warning("PhreeqPython not available, cannot use PHREEQC databases")
 
-    # Log which tools are registered
-    logger.info("=== WATER CHEMISTRY MCP SERVER v3.0 ===\n")
-    logger.info("Registered 17 tools:\n")
-    logger.info("CORE ANALYSIS TOOLS (5):")
-    logger.info("  1. calculate_solution_speciation: Water quality analysis and equilibrium speciation")
-    logger.info("  2. simulate_chemical_addition: Treatment simulation with precipitation modeling")
-    logger.info("  3. simulate_solution_mixing: Stream blending and mixing analysis")
-    logger.info("  4. predict_scaling_potential: Scaling risk assessment for all systems")
-    logger.info("  5. batch_process_scenarios: Parallel scenario processing & optimization")
-    logger.info("\nADVANCED PHREEQC TOOLS (6):")
-    logger.info("  6. calculate_dosing_requirement: Binary search for target pH/hardness/SI")
-    logger.info("  7. query_thermodynamic_database: Query minerals, species, elements")
-    logger.info("  8. simulate_kinetic_reaction: Time-dependent reaction modeling")
-    logger.info("  9. simulate_gas_phase_interaction: Gas-water equilibration")
-    logger.info("  10. simulate_redox_adjustment: pe/Eh/couple adjustment")
-    logger.info("  11. simulate_surface_interaction: Surface complexation/adsorption")
-    logger.info("\nOPTIMIZATION TOOLS (5):")
-    logger.info("  12. generate_lime_softening_curve: Complete dose-response curves")
-    logger.info("  13. calculate_lime_softening_dose: Optimal lime softening dose")
-    logger.info("  14. calculate_dosing_requirement_enhanced: Multi-objective dosing optimization")
-    logger.info("  15. optimize_multi_reagent_treatment: Multi-reagent with 4 strategies")
-    logger.info("  16. calculate_phosphorus_removal_dose: Unified P removal (Fe/Al/Mg/Ca strategies)")
-    logger.info("\nDIAGNOSTICS TOOLS (1):")
-    logger.info("  17. get_engine_status: Engine health check and database availability")
-    logger.info("\n✅ FAIL LOUDLY: All errors raise typed exceptions")
-    logger.info("✅ PHREEQC thermodynamics via phreeqpython API")
-    logger.info("✅ Inline PHREEQC blocks for Struvite, Variscite, HAO surface")
-    logger.info("\n=== SERVER READY ===")
+    logger.info("=== WATER CHEMISTRY MCP SERVER v3.1 ===")
+    logger.info("Registered 17 tools")
+    logger.info("=== SERVER READY ===")
 
     # Start the server
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

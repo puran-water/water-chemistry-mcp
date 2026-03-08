@@ -11,7 +11,6 @@ Strict assertions - specific value checks with tolerances.
 """
 
 import pytest
-import asyncio
 from typing import Dict, Any
 
 from tools.optimization_tools import (

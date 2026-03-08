@@ -9,7 +9,7 @@ import logging
 import os
 import re
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List
 
 from utils.database_management import database_manager
 from utils.exceptions import (
@@ -20,8 +20,6 @@ from utils.exceptions import (
     InputValidationError,
     TermNotFoundError,
 )
-from utils.import_helpers import DEFAULT_DATABASE, PHREEQPYTHON_AVAILABLE
-
 from .schemas import QueryThermoDatabaseInput, QueryThermoDatabaseOutput
 
 logger = logging.getLogger(__name__)

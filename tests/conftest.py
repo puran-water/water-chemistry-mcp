@@ -1,19 +1,30 @@
 """
-Shared pytest fixtures for ferric phosphate test suite.
+Shared pytest fixtures for the water-chemistry-mcp test suite.
 
 Uses existing constants from the codebase - no hardcoded molecular weights.
 """
 
-import pytest
 import sys
 from pathlib import Path
+
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Old-style tests using custom runners (run via: python tests/run_all_tests.py or directly)
+# These use non-pytest patterns (TestResults class, boolean returns instead of assertions).
+collect_ignore = [
+    "test_batch_processing.py",
+    "test_chemical_addition.py",
+    "test_scaling_potential.py",
+    "test_solution_speciation.py",
+    "test_solution_mixing.py",
+]
+
 # Import existing constants from the codebase
-from tools.schemas_ferric import MOLECULAR_WEIGHTS, mg_l_to_mmol, mmol_to_mg_l
-from utils.constants import MOLAR_MASS, MG_L_TO_MOL_KGW
+from tools.schemas_ferric import MOLECULAR_WEIGHTS
+from utils.constants import MOLAR_MASS
 
 
 # =============================================================================

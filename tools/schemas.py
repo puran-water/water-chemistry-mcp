@@ -6,7 +6,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, root_validator, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,8 @@ class WaterAnalysisInput(BaseModel):
         None, description="Redox couple to define pe (e.g., 'O(-2)/O(0)' or 'Fe(2)/Fe(3)'. Overrides pe if set."
     )
 
-    # Validate analysis components
-    @validator("analysis")
+    @field_validator("analysis")
+    @classmethod
     def validate_analysis(cls, v):
         """Validate and standardize water analysis components."""
         if not v:
@@ -210,8 +210,8 @@ class WaterAnalysisInput(BaseModel):
 
         return standardized
 
-    # Validate pH
-    @validator("ph")
+    @field_validator("ph")
+    @classmethod
     def validate_ph(cls, v):
         """Validate pH is within reasonable range."""
         if v is not None:
@@ -219,8 +219,8 @@ class WaterAnalysisInput(BaseModel):
                 raise ValueError(f"pH value {v} is outside the reasonable range of 0-14")
         return v
 
-    # Validate pe
-    @validator("pe")
+    @field_validator("pe")
+    @classmethod
     def validate_pe(cls, v):
         """Validate pe is within reasonable range."""
         if v is not None:
@@ -228,27 +228,27 @@ class WaterAnalysisInput(BaseModel):
                 raise ValueError(f"pe value {v} is outside the reasonable range of -25 to +25")
         return v
 
-    # Validate temperature
-    @validator("temperature_celsius")
+    @field_validator("temperature_celsius")
+    @classmethod
     def validate_temperature(cls, v):
         """Validate temperature is within reasonable range."""
         if v is not None:
-            if v < -273.15:  # Absolute zero
+            if v < -273.15:
                 raise ValueError("Temperature cannot be below absolute zero (-273.15°C)")
-            if v > 1000:  # Arbitrarily high but reasonable limit
+            if v > 1000:
                 raise ValueError("Temperature is unreasonably high (>1000°C)")
         return v
 
-    # Validate pressure
-    @validator("pressure_atm")
+    @field_validator("pressure_atm")
+    @classmethod
     def validate_pressure(cls, v):
         """Validate pressure is positive."""
         if v is not None and v <= 0:
             raise ValueError("Pressure must be positive")
         return v
 
-    # Validate units
-    @validator("units")
+    @field_validator("units")
+    @classmethod
     def validate_units(cls, v):
         """Validate and standardize concentration units."""
         if v is None:
@@ -285,31 +285,21 @@ class WaterAnalysisInput(BaseModel):
         # Return as is if not in mapping
         return v
 
-    @validator("ph", pre=True, always=True)
-    def normalize_ph_input(cls, v, values):
-        """Accept both 'pH' and 'ph' as input field names"""
-        # This is a pre-validator, so we can't access other fields directly
-        # Instead, this will be called before field assignment
-        return v
-
-    @root_validator(pre=True, skip_on_failure=True)
-    def handle_ph_case(cls, values):
-        """Handle both 'pH' and 'ph' input field names"""
-        if "pH" in values and "ph" not in values:
-            values["ph"] = values.pop("pH")
-        return values
-
-    @root_validator(pre=True, skip_on_failure=True)
-    def handle_temperature_aliases(cls, values):
-        """Accept 'temperature' or 'temp' as aliases for 'temperature_celsius'."""
-        # Prefer explicit temperature_celsius if provided
-        if "temperature_celsius" not in values:
-            # Map common aliases
-            for alias in ("temperature", "temp", "Temperature", "Temp"):
-                if alias in values:
-                    values["temperature_celsius"] = values.pop(alias)
-                    break
-        return values
+    @model_validator(mode="before")
+    @classmethod
+    def handle_input_aliases(cls, data):
+        """Handle pH case sensitivity and temperature aliases."""
+        if isinstance(data, dict):
+            # Handle both 'pH' and 'ph'
+            if "pH" in data and "ph" not in data:
+                data["ph"] = data.pop("pH")
+            # Handle temperature aliases
+            if "temperature_celsius" not in data:
+                for alias in ("temperature", "temp", "Temperature", "Temp"):
+                    if alias in data:
+                        data["temperature_celsius"] = data.pop(alias)
+                        break
+        return data
 
 
 class SolutionOutput(BaseModel):
@@ -367,8 +357,8 @@ class ReactantInput(BaseModel):
         description="Units for the amount (e.g., 'mmol', 'g', 'mg'). Assumed per liter unless specified otherwise.",
     )
 
-    # Custom validation to sanitize formula and handle formula format issues
-    @validator("formula")
+    @field_validator("formula")
+    @classmethod
     def sanitize_formula(cls, v):
         """Sanitize chemical formula to prevent PHREEQC parsing errors."""
         # Remove any unexpected characters
@@ -399,16 +389,16 @@ class ReactantInput(BaseModel):
         # Return the sanitized formula if no mapping is found
         return sanitized
 
-    # Validate amount is positive
-    @validator("amount")
+    @field_validator("amount")
+    @classmethod
     def positive_amount(cls, v):
         """Ensure amount is positive."""
         if v <= 0:
             raise ValueError("Amount must be positive")
         return v
 
-    # Validate and standardize units
-    @validator("units")
+    @field_validator("units")
+    @classmethod
     def standardize_units(cls, v):
         """Standardize units to those that PHREEQC recognizes."""
         if v is None:
@@ -504,29 +494,18 @@ class KineticParameters(BaseModel):
     minerals_kinetic: Dict[str, PHREEQCKineticParameters] = Field(
         None,
         description="PHREEQC kinetic parameters for each mineral.",
-        example={
-            "Calcite": {
-                "m0": 0.0,  # Starting with no solid
-                "parms": [1.67e5, 0.6],  # cm²/mol calcite, exponent for M/M0
-                "tol": 1e-8,
-            }
+        json_schema_extra={
+            "examples": [
+                {
+                    "Calcite": {
+                        "m0": 0.0,
+                        "parms": [1.67e5, 0.6],
+                        "tol": 1e-8,
+                    }
+                }
+            ]
         },
     )
-
-
-# Keep the old schema for backward compatibility
-class CustomKineticMineralParameters(BaseModel):
-    """Parameters for custom kinetic precipitation/dissolution (deprecated)."""
-
-    rate_constant: float = Field(..., description="Rate constant at 25°C in mol/m²/s.")
-    surface_area: float = Field(1.0, description="Initial surface area to volume ratio in m²/L.")
-    activation_energy: Optional[float] = Field(
-        48000, description="Activation energy in J/mol for temperature correction."
-    )
-    surface_area_exponent: Optional[float] = Field(
-        0.67, description="Exponent for surface area evolution (typically 0.67 for spheres)."
-    )
-    nucleation_si_threshold: Optional[float] = Field(0.0, description="Minimum SI required for nucleation to begin.")
 
 
 class SimulateChemicalAdditionInput(BaseModel):
@@ -630,78 +609,47 @@ class CalculateDosingRequirementOutput(BaseModel):
 # Tool 4: simulate_solution_mixing
 class SolutionToMix(BaseModel):
     solution: WaterAnalysisInput = Field(..., description="Definition of the solution to mix.")
-    # Accept either 'fraction' or 'volume_L', plus backward-compatible aliases
     fraction: Optional[float] = Field(None, description="Mixing fraction (0-1). Will be normalized across solutions.")
     volume_L: Optional[float] = Field(None, description="Mixing volume in liters.")
-    # Backward-compatibility with older schema and external clients
-    fraction_or_volume: Optional[float] = Field(None, description="Deprecated: use 'fraction' or 'volume_L'.")
-    volume_fraction: Optional[float] = Field(
-        None, description="Alias for 'fraction' for compatibility with some clients."
-    )
 
-    @root_validator(pre=True, skip_on_failure=True)
-    def normalize_fraction_volume_fields(cls, values):
-        """Normalize input to prefer explicit 'fraction' or 'volume_L'."""
-        # If volume_fraction provided, map to fraction
-        if "volume_fraction" in values and "fraction" not in values:
-            values["fraction"] = values.get("volume_fraction")
-
-        # If only fraction_or_volume is provided, keep it as either fraction or volume
-        if "fraction_or_volume" in values and "fraction" not in values and "volume_L" not in values:
-            values["fraction"] = values.get("fraction_or_volume")
-
-        return values
-
-    @root_validator(skip_on_failure=True)
-    def validate_fraction_or_volume(cls, values):
-        """Ensure exactly one of fraction or volume_L is provided; allow explicit zero for fraction."""
-        frac = values.get("fraction")
-        vol = values.get("volume_L")
-
-        # If both provided, that's ambiguous
-        if frac is not None and vol is not None:
+    @model_validator(mode="after")
+    def validate_mixing_weight(self):
+        """Ensure at most one of fraction or volume_L is provided."""
+        if self.fraction is not None and self.volume_L is not None:
             raise ValueError("Provide either 'fraction' or 'volume_L', not both")
-
-        # If neither provided, allow later defaulting (e.g., equal fractions) by leaving as None
-        # This will be handled by the mixing tool logic.
-        return values
+        return self
 
 
 class SimulateSolutionMixingInput(BaseModel):
     solutions_to_mix: List[SolutionToMix] = Field(
-        ..., min_items=2, description="List of solutions and their mixing fractions/volumes."
+        ..., min_length=2, description="List of solutions and their mixing fractions/volumes."
     )
     database: Optional[str] = Field(None, description="Path or name of the PHREEQC database file to use.")
     allow_precipitation: Optional[bool] = Field(
         True, description="Whether to allow mineral precipitation/dissolution during mixing. Default True."
     )
 
-    @root_validator(pre=True, skip_on_failure=True)
-    def allow_simplified_solutions_schema(cls, values):
-        """Support simplified input {'solutions': [{analysis..., volume_fraction/volume_L/...}, ...]}.
+    @model_validator(mode="before")
+    @classmethod
+    def allow_simplified_solutions_schema(cls, data):
+        """Support simplified input {'solutions': [{analysis..., fraction/volume_L/...}, ...]}.
         Transforms to structured solutions_to_mix list automatically.
         """
+        values = data if isinstance(data, dict) else data
         if "solutions_to_mix" not in values and "solutions" in values:
             simplified = values.get("solutions") or []
             structured = []
             for item in simplified:
-                # Split into solution and mixing key
-                sol_fields = {}
                 mix_kwargs = {}
-                # Map temperature aliases here too
                 item_copy = dict(item)
                 if "temperature" in item_copy and "temperature_celsius" not in item_copy:
                     item_copy["temperature_celsius"] = item_copy.pop("temperature")
 
-                # volume_fraction -> fraction; volume_L kept; fraction also honored
-                if "volume_fraction" in item_copy:
-                    mix_kwargs["fraction"] = item_copy.pop("volume_fraction")
-                elif "fraction" in item_copy:
+                if "fraction" in item_copy:
                     mix_kwargs["fraction"] = item_copy.pop("fraction")
                 if "volume_L" in item_copy:
                     mix_kwargs["volume_L"] = item_copy.pop("volume_L")
 
-                # Remaining fields become WaterAnalysisInput
                 sol_fields = item_copy
                 structured.append({"solution": sol_fields, **mix_kwargs})
 
@@ -742,8 +690,8 @@ class GasPhaseDefinition(BaseModel):
     )
     temperature_celsius: Optional[float] = Field(25.0, description="Initial temperature of gas phase. Default 25.0.")
 
-    # Validate gas phase type
-    @validator("type")
+    @field_validator("type")
+    @classmethod
     def validate_gas_phase_type(cls, v):
         """Validate and standardize the gas phase type."""
         v_lower = v.lower().strip()
@@ -755,8 +703,8 @@ class GasPhaseDefinition(BaseModel):
         else:
             raise ValueError("Gas phase type must be 'fixed_pressure' or 'fixed_volume'")
 
-    # Validate gas components
-    @validator("initial_components")
+    @field_validator("initial_components")
+    @classmethod
     def validate_gas_components(cls, v):
         """Validate and standardize gas component formulas."""
         if not v:
@@ -835,24 +783,24 @@ class GasPhaseDefinition(BaseModel):
 
         return standardized_components
 
-    # Validate pressure
-    @validator("fixed_pressure_atm")
+    @field_validator("fixed_pressure_atm")
+    @classmethod
     def validate_pressure(cls, v):
         """Validate pressure is positive."""
         if v is not None and v <= 0:
             raise ValueError("Pressure must be positive")
         return v
 
-    # Validate volume
-    @validator("initial_volume_liters")
+    @field_validator("initial_volume_liters")
+    @classmethod
     def validate_volume(cls, v):
         """Validate volume is positive."""
         if v is not None and v <= 0:
             raise ValueError("Volume must be positive")
         return v
 
-    # Validate temperature
-    @validator("temperature_celsius")
+    @field_validator("temperature_celsius")
+    @classmethod
     def validate_temperature(cls, v):
         """Validate temperature is within a reasonable range."""
         if v is not None:
@@ -942,8 +890,8 @@ class KineticReaction(BaseModel):
         None,
         description="Optional chemical formula (e.g., 'CaCO3', 'FeS2') or formula dictionary (e.g., {'N(5)': -1, 'N(3)': 1}).",
     )
-    parameters: Optional[Dict[str, Union[float, str]]] = Field(
-        None, description="Rate parameters (e.g., {m: 1, m0: 1, parm(1): 0.1})."
+    parameters: Optional[Dict[str, Union[float, str, List[float]]]] = Field(
+        None, description="Rate parameters (e.g., {m0: 1, parms: [0.6, 0.67], tol: 1e-8})."
     )
     custom_kinetics_line: Optional[str] = Field(None, description="Optional custom line for the KINETICS block.")
 
@@ -971,13 +919,17 @@ class TimeStepDefinition(BaseModel):
     """Definition of time steps for kinetic simulation."""
 
     # Support both raw values and structured time step definitions
-    time_values: Optional[List[float]] = Field(None, description="List of time points for simulation steps.")
+    time_values: Optional[List[float]] = Field(
+        None, description="List of time points for simulation steps.", alias="values"
+    )
     units: Optional[str] = Field("seconds", description="Units for time values (e.g., 'seconds', 'hours', 'days').")
 
     # Alternative simplified inputs
     count: Optional[int] = Field(None, description="Number of equal time steps.")
     duration: Optional[float] = Field(None, description="Total duration of simulation.")
     duration_units: Optional[str] = Field("seconds", description="Units for duration.")
+
+    model_config = {"populate_by_name": True}
 
 
 class SimulateKineticReactionInput(BaseModel):

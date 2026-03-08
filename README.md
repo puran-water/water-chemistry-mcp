@@ -65,8 +65,8 @@ Features:
 ### Advanced Capabilities
 
 - **Multi-database Support**: phreeqc.dat, minteq.dat, minteq.v4.dat, llnl.dat, wateq4f.dat, pitzer.dat
-- **USGS PHREEQC Support**: Subprocess mode for full USGS database compatibility
-- **Cross-platform Compatibility**: Windows, Linux, macOS, and WSL environments
+- **PHREEQC Subprocess Support**: Optional standalone PHREEQC executable for extended compatibility
+- **Cross-platform Compatibility**: Linux, macOS, and WSL environments
 - **Kinetic & Equilibrium Modeling**: Both instantaneous and time-dependent processes
 - **Multi-objective Optimization**: Pareto front, weighted sum, sequential, and robust strategies
 - **FAIL LOUDLY Error Handling**: Typed exceptions instead of silent failures
@@ -216,7 +216,11 @@ water-chemistry-mcp/
 │   ├── gas_phase.py              # Gas-water equilibria
 │   ├── redox_adjustment.py       # Redox control
 │   ├── surface_interaction.py    # Surface complexation
-│   ├── phreeqc_wrapper.py        # PHREEQC integration + engine status
+│   ├── phreeqc/                  # PHREEQC engine package
+│   │   ├── backend.py            # Subprocess execution + engine status
+│   │   ├── parser.py             # Output parsing
+│   │   ├── simulation.py         # Simulation orchestration
+│   │   └── optimizer.py          # Dosing optimization
 │   ├── schemas.py                # Core Pydantic schemas
 │   └── schemas_ferric.py         # P removal specific schemas
 ├── utils/                        # Utility modules
@@ -240,9 +244,9 @@ water-chemistry-mcp/
 ### Environment Variables
 
 ```bash
-USGS_PHREEQC_DATABASE_PATH=/path/to/usgs/databases/
-USE_PHREEQC_SUBPROCESS=1  # Enable USGS subprocess mode
-WATER_CHEMISTRY_DEBUG=1   # Enable debug logging
+PHREEQC_EXECUTABLE=/usr/local/bin/phreeqc  # Optional: standalone PHREEQC executable
+USE_PHREEQC_SUBPROCESS=1                    # Enable subprocess mode
+WATER_CHEMISTRY_DEBUG=1                     # Enable debug logging
 ```
 
 ### MCP Client Configuration
@@ -254,10 +258,7 @@ For Claude Desktop:
   "mcpServers": {
     "water-chemistry": {
       "command": "python",
-      "args": ["/path/to/water-chemistry-mcp/server.py"],
-      "env": {
-        "USGS_PHREEQC_DATABASE_PATH": "/path/to/databases/"
-      }
+      "args": ["/path/to/water-chemistry-mcp/server.py"]
     }
   }
 }
@@ -275,7 +276,7 @@ For Claude Desktop:
 - **NEW**: P partitioning outputs (phase moles, adsorbed P, dissolved P)
 - **NEW**: Enhanced redox diagnostics with control variable and pO2 fields
 - FAIL LOUDLY error handling with typed exceptions
-- USGS PHREEQC subprocess support
+- Optional PHREEQC subprocess execution
 - Multi-objective optimization with 4 strategies
 - Comprehensive test coverage (390+ tests)
 
@@ -288,7 +289,7 @@ For Claude Desktop:
 
 - Python 3.9+
 - PhreeqPython 1.5.2+
-- PHREEQC databases (bundled or USGS)
+- PHREEQC databases (bundled with PhreeqPython or repo-local)
 - See [requirements.txt](requirements.txt) for full dependencies
 
 ## License

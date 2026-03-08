@@ -205,3 +205,15 @@ auth.json
 .aws/
 .azure/
 .gcloud/
+
+# Generated version file (setuptools-scm)
+_version.py
+
+# Reference materials (not source code)
+reference_gitignore/
+
+# Temporary Excel files
+struvite_temp.xlam
+
+# Lock files
+uv.lock

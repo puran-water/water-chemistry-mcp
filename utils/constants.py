@@ -7,8 +7,8 @@ import os
 # Default database paths for PhreeqPython
 DEFAULT_DATABASE_NAMES = ["phreeqc.dat", "wateq4f.dat", "minteq.v4.dat", "pitzer.dat", "sit.dat", "llnl.dat"]
 
-# Preferred database paths for USGS PHREEQC installation
-# Order indicates preference - minteq.dat is essential for water treatment (has Calcite for lime softening)
+# Preferred database names in order of preference for water treatment
+# minteq.dat is essential for water treatment (has Calcite for lime softening)
 PREFERRED_DATABASE_NAMES = [
     "minteq.dat",  # MINTEQA2 database - essential for water treatment, contains Calcite, Brucite, comprehensive minerals
     "minteq.v4.dat",  # MINTEQA2 database version 4
@@ -49,8 +49,6 @@ MG_HYDROXIDE_NAMES = {
     "llnl.dat": "Brucite",
 }
 
-# Legacy name for backward compatibility
-DEFAULT_MINERALS = UNIVERSAL_MINERALS
 
 # Specialized mineral sets for water treatment processes
 SOFTENING_MINERALS = ["Calcite", "Aragonite", "Brucite", "Portlandite", "Lime"]  # Ca(OH)2  # CaO

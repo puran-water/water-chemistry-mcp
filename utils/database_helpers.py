@@ -5,9 +5,9 @@ Helper functions for PHREEQC database management.
 import logging
 import os
 import re
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Tuple
 
-from .import_helpers import USGS_PHREEQC_DATABASE_PATH, get_available_database_paths, get_default_database
+from .import_helpers import get_available_database_paths, get_default_database
 
 logger = logging.getLogger(__name__)
 
@@ -150,9 +150,11 @@ def get_database_stats() -> List[Dict[str, any]]:
     db_stats = []
     available_databases = list_available_databases()
 
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    repo_db_prefix = os.path.join(repo_root, "databases")
+
     for db_path, description in available_databases:
         db_name = os.path.basename(db_path)
-        is_from_usgs = USGS_PHREEQC_DATABASE_PATH in db_path
         is_default = db_path == get_default_database()
 
         # Get some basic stats about the database
@@ -164,7 +166,7 @@ def get_database_stats() -> List[Dict[str, any]]:
                 "name": db_name,
                 "path": db_path,
                 "description": description,
-                "is_usgs": is_from_usgs,
+                "is_repo_local": db_path.startswith(repo_db_prefix),
                 "is_default": is_default,
                 "element_count": element_count,
                 "mineral_count": mineral_count,

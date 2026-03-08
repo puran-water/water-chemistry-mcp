@@ -5,20 +5,17 @@ This module provides functionality to convert between different PHREEQC database
 and to merge multiple databases into composite databases.
 """
 
-import json
 import logging
 import os
 import re
 import shutil
 import tempfile
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional
 
-from .database_downloader import CACHED_DIR, CUSTOM_DIR, DATABASE_DIR, METADATA_DIR, OFFICIAL_DIR
+from .database_downloader import DATABASE_DIR
 from .database_validator import (
-    extract_database_elements,
     extract_database_minerals,
-    extract_solution_species,
     scan_database_for_mineral,
     validate_database,
 )

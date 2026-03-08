@@ -4,14 +4,13 @@ Database management module for PHREEQC.
 Provides centralized functionality for database selection, validation, and information.
 """
 
-import glob
 import json
 import logging
 import os
 import shutil
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
-from .import_helpers import USGS_PHREEQC_DATABASE_PATH, get_available_database_paths, get_default_database
+from .import_helpers import get_available_database_paths, get_default_database
 from .mineral_registry import COMMON_MINERALS, DATABASE_SPECIFIC_MINERALS
 
 # Import database cache functions - will be imported later to avoid circular imports
@@ -36,8 +35,7 @@ class DatabaseManager:
         """
         Resolves a database path or name to a full path.
 
-        When USE_PHREEQC_SUBPROCESS is enabled, prefers USGS databases over bundled ones
-        since subprocess mode is specifically designed for USGS database compatibility.
+        Searches available databases list (repo-local first, then bundled).
 
         Args:
             database_path: Full path or just database filename
@@ -53,18 +51,7 @@ class DatabaseManager:
         if not os.path.dirname(database_path):  # No directory component
             db_name = database_path
 
-            # Check if subprocess mode is enabled - if so, prefer USGS databases
-            use_subprocess = os.environ.get("USE_PHREEQC_SUBPROCESS", "").lower() in ("1", "true", "yes")
-
-            if use_subprocess and USGS_PHREEQC_DATABASE_PATH:
-                # When subprocess mode is enabled, prefer USGS databases
-                # since they have full mineral support with the USGS PHREEQC executable
-                usgs_db_path = os.path.join(USGS_PHREEQC_DATABASE_PATH, db_name)
-                if os.path.exists(usgs_db_path):
-                    logger.info(f"Subprocess mode: using USGS database {usgs_db_path}")
-                    return usgs_db_path
-
-            # Fallback to available databases list
+            # Search available databases list (repo-local first, then bundled)
             for db in self.available_databases:
                 if os.path.basename(db) == db_name:
                     return db
@@ -145,7 +132,8 @@ class DatabaseManager:
 
         # Basic info
         db_name = os.path.basename(database_path)
-        is_usgs = USGS_PHREEQC_DATABASE_PATH is not None and database_path.startswith(USGS_PHREEQC_DATABASE_PATH)
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        is_repo_local = database_path.startswith(os.path.join(repo_root, "databases"))
         is_default = database_path == self.default_database
 
         # Read file to get more detailed info
@@ -180,7 +168,7 @@ class DatabaseManager:
             info = {
                 "name": db_name,
                 "path": database_path,
-                "is_usgs": is_usgs,
+                "is_repo_local": is_repo_local,
                 "is_default": is_default,
                 "element_count": element_count,
                 "mineral_count": mineral_count,
@@ -203,7 +191,7 @@ class DatabaseManager:
             error_info = {
                 "name": db_name,
                 "path": database_path,
-                "is_usgs": is_usgs,
+                "is_repo_local": is_repo_local,
                 "is_default": is_default,
                 "error": str(e),
             }
@@ -258,24 +246,14 @@ class DatabaseManager:
             if kinetic_dbs:
                 return kinetic_dbs[0]["path"]
 
-        # Default recommendation strategy for general purpose
-        # Prioritize USGS databases first
-        usgs_dbs = [db for db in db_info_list if db.get("is_usgs", False)]
-        if usgs_dbs:
-            # Look for phreeqc.dat first - it has common minerals like Calcite
-            for db in usgs_dbs:
-                if "phreeqc.dat" in db["name"].lower():
-                    return db["path"]
-            # Then try WATEQ4F which is comprehensive
-            for db in usgs_dbs:
-                if "wateq" in db["name"].lower():
-                    return db["path"]
-            # LLNL is comprehensive but missing common minerals
-            for db in usgs_dbs:
-                if "llnl" in db["name"].lower():
+        # Default recommendation: prefer common databases by name
+        preferred_order = ["phreeqc.dat", "wateq4f.dat", "llnl.dat", "minteq.v4.dat"]
+        for pref in preferred_order:
+            for db in db_info_list:
+                if db["name"].lower() == pref:
                     return db["path"]
 
-        # If no USGS databases or specific matches, use best available based on features
+        # No preferred match — use best available based on feature count
         db_info_list.sort(key=lambda x: sum(1 for f in x.get("features", {}).values() if f), reverse=True)
         if db_info_list:
             return db_info_list[0]["path"]
@@ -699,109 +677,23 @@ class DatabaseManager:
         """
         Returns the full path to a database by name.
 
+        Searches only the pre-discovered available_databases list (repo-local,
+        PhreeqPython bundled). No secondary filesystem searches or silent fallbacks.
+
         Args:
             database_name: Name of the database (e.g., 'phreeqc.dat', 'pitzer.dat')
 
         Returns:
             Full path to the database or None if not found
         """
-        # Ensure database name has .dat extension
         if not database_name.lower().endswith(".dat"):
             database_name = database_name + ".dat"
-            logger.info(f"Added .dat extension to database name: {database_name}")
 
-        # First check if we have this database in available_databases
         for db_path in self.available_databases:
             if os.path.basename(db_path).lower() == database_name.lower():
-                logger.info(f"Found database {database_name} in available_databases: {db_path}")
                 return db_path
 
-        # If not found, try to search in common PHREEQC locations
-        # Make sure we include both Windows and WSL paths
-        wsl_prefixes = ["", "/mnt/c"]  # Empty string for native paths, /mnt/c for WSL paths to Windows
-
-        # Start with common base paths
-        base_paths = [
-            # USGS PHREEQC installation
-            USGS_PHREEQC_DATABASE_PATH,
-            # MCP server database directory
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "databases", "official"),
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "databases", "custom"),
-            # PhreeqPython database directory (try multiple possible locations)
-            os.path.join(os.path.dirname(__file__), "..", "..", "phreeqpython", "phreeqpython", "database"),
-            os.path.join(os.path.dirname(__file__), "..", "..", "phreeqpython", "database"),
-            # Common PHREEQC installation locations (standardizing on both Windows path formats)
-            "/usr/local/share/phreeqc/database",
-            "/usr/share/phreeqc/database",
-        ]
-
-        # Add Windows-specific paths with prefixes for WSL compatibility
-        windows_paths = [
-            "C:\\Program Files\\USGS\\phreeqc-3.8.6-17100-x64\\database",
-            "C:\\Program Files\\USGS\\phreeqc-3.8.6-17100-x6\\database",
-            "C:\\Program Files\\USGS\\phreeqc-3.7.3-15968-x64\\database",
-            "C:\\Program Files\\USGS\\phreeqc-3.6.2-15100-x64\\database",
-            "C:\\Program Files\\USGS\\phreeqc-3.5.0-14000-x64\\database",
-            "C:\\Program Files\\USGS\\phreeqc-3.4.0-12927-x64\\database",
-        ]
-
-        # Create common_paths by combining base_paths and Windows paths with prefixes
-        common_paths = list(base_paths)  # Start with base paths
-
-        # Add Windows paths with appropriate prefixes for WSL
-        for prefix in wsl_prefixes:
-            for win_path in windows_paths:
-                # For WSL paths, convert Windows backslashes to forward slashes
-                if prefix:
-                    win_path_conv = win_path.replace("\\", "/")
-                    common_paths.append(os.path.join(prefix, win_path_conv))
-                else:
-                    common_paths.append(win_path)
-
-        logger.info(f"Searching for database {database_name} in {len(common_paths)} common locations")
-
-        # Search for the database in these paths
-        for path in common_paths:
-            try:
-                if path and os.path.exists(path):
-                    db_path = os.path.join(path, database_name)
-                    if os.path.exists(db_path):
-                        logger.info(f"Found database {database_name} at: {db_path}")
-                        return db_path
-            except Exception as e:
-                logger.debug(f"Error checking path {path}: {e}")
-                pass
-
-        # Last resort - try searching in cached database directory
-        try:
-            cached_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "databases", "cached")
-            if os.path.exists(cached_dir):
-                # Try exact match first
-                db_path = os.path.join(cached_dir, database_name)
-                if os.path.exists(db_path):
-                    logger.info(f"Found database {database_name} in cached directory: {db_path}")
-                    return db_path
-
-                # Try case-insensitive search as a fallback
-                for filename in os.listdir(cached_dir):
-                    if filename.lower() == database_name.lower():
-                        db_path = os.path.join(cached_dir, filename)
-                        logger.info(f"Found database {database_name} (as {filename}) in cached directory: {db_path}")
-                        return db_path
-        except Exception as e:
-            logger.debug(f"Error checking cached directory: {e}")
-
-        # Database not found
-        logger.warning(f"Database {database_name} not found in any known locations")
-
-        # As a fallback, try to see if a different default database is available
-        if database_name.lower() != "phreeqc.dat":
-            # Try to get phreeqc.dat as a fallback
-            fallback_path = self.get_database_path("phreeqc.dat")
-            if fallback_path:
-                logger.warning(f"Using phreeqc.dat as fallback for {database_name}")
-                return fallback_path
-
+        logger.warning(f"Database {database_name} not found in available databases")
         return None
 
     def get_database_descriptions(self) -> Dict[str, str]:

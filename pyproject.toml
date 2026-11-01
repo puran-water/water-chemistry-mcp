@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "water-chemistry-mcp"
+version = "0.1.0"
+description = "PHREEQC water speciation, mixing, equilibrium screening and chemical dosing through typed MCP tools."
+requires-python = ">=3.12"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE*", "NOTICE", "THIRD-PARTY-NOTICES/**/*"]
+authors = [{name = "Puran Water"}]
+dependencies = [
+  "fastmcp>=3.0",
+  "phreeqpython>=1.5.2",
+  "periodictable>=1.6",
+  "pydantic>=2.0.0",
+  "numpy>=1.20.0",
+  "scipy>=1.10.0",
+  "requests>=2.25.0",
+  "puran-mcp-support[chemistry]==0.1.0"
+]
+
+[project.scripts]
+water-chemistry-mcp = "water_chemistry_mcp.__main__:main"
+
+[project.urls]
+Homepage = "https://puranwater.com"
+Repository = "https://github.com/puran-water/water-chemistry-mcp"
+Issues = "https://github.com/puran-water/water-chemistry-mcp/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/water_chemistry_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "README.md", "LICENSE*", "NOTICE", "THIRD-PARTY-NOTICES", "LICENSE-TABLE.md", "SCAN-REPORT.md", "TEST-RESULTS.md", "HISTORICAL-QUALITY.md", "RESOURCE-LICENSES.csv", "KNOWN-ISSUES.md", "pyproject.toml"]

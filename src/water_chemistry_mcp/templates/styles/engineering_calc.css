@@ -1,0 +1,310 @@
+/* Professional Engineering Calculation Sheet Styling */
+
+/* Base document styling */
+body {
+    font-family: 'Arial', 'Helvetica', sans-serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #000000;
+    background-color: #ffffff;
+    max-width: 8.5in;
+    margin: 0.5in auto;
+    padding: 0;
+}
+
+/* Headers */
+h1 {
+    font-size: 16pt;
+    font-weight: bold;
+    text-transform: uppercase;
+    border-bottom: 3px solid #000000;
+    padding-bottom: 0.5em;
+    margin-top: 0;
+    page-break-after: avoid;
+}
+
+h2 {
+    font-size: 14pt;
+    font-weight: bold;
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+    page-break-after: avoid;
+}
+
+h3 {
+    font-size: 12pt;
+    font-weight: bold;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+    page-break-after: avoid;
+}
+
+/* Tables */
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+    font-size: 10pt;
+}
+
+th {
+    background-color: #e6e6e6;
+    font-weight: bold;
+    text-align: left;
+    padding: 8px;
+    border: 1px solid #000000;
+}
+
+td {
+    padding: 6px 8px;
+    border: 1px solid #000000;
+    vertical-align: top;
+}
+
+/* Signature table specific styling */
+table:first-of-type th,
+table:first-of-type td {
+    text-align: center;
+    width: 33.33%;
+}
+
+/* Equations and formulas */
+.MathJax_Display {
+    margin: 1em 0;
+    overflow-x: auto;
+}
+
+/* Code blocks for calculations */
+pre {
+    background-color: #f5f5f5;
+    border: 1px solid #cccccc;
+    border-left: 4px solid #666666;
+    padding: 10px;
+    margin: 1em 0;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 9pt;
+    overflow-x: auto;
+    page-break-inside: avoid;
+}
+
+/* Result highlighting */
+.result-box {
+    border: 2px solid #000000;
+    background-color: #f0f0f0;
+    padding: 1em;
+    margin: 1.5em 0;
+    page-break-inside: avoid;
+}
+
+.result-box h3 {
+    margin-top: 0;
+}
+
+/* Important values */
+.important {
+    font-weight: bold;
+    color: #000080;
+}
+
+/* Lists */
+ul, ol {
+    margin-left: 1.5em;
+    margin-bottom: 1em;
+}
+
+li {
+    margin-bottom: 0.3em;
+}
+
+/* Page breaks */
+.pagebreak {
+    page-break-before: always;
+}
+
+/* Hide input cells in final output */
+.jp-InputArea {
+    display: none !important;
+}
+
+/* Output formatting */
+.jp-OutputArea-output pre {
+    background-color: transparent;
+    border: none;
+    padding: 0;
+}
+
+/* Print-specific styles */
+@media print {
+    body {
+        margin: 0;
+        padding: 0;
+        font-size: 10pt;
+    }
+    
+    h1 {
+        font-size: 14pt;
+    }
+    
+    h2 {
+        font-size: 12pt;
+    }
+    
+    h3 {
+        font-size: 11pt;
+    }
+    
+    table {
+        font-size: 9pt;
+    }
+    
+    pre {
+        font-size: 8pt;
+    }
+    
+    /* Ensure tables don't break across pages */
+    table {
+        page-break-inside: avoid;
+    }
+    
+    /* Add page numbers */
+    @page {
+        @bottom-right {
+            content: "Page " counter(page) " of " counter(pages);
+            font-size: 9pt;
+        }
+    }
+}
+
+/* Professional data presentation */
+.data-table {
+    margin: 1em 0;
+}
+
+.data-table caption {
+    font-weight: bold;
+    margin-bottom: 0.5em;
+    text-align: left;
+}
+
+/* Calculation steps */
+.calc-step {
+    margin: 1em 0;
+    padding-left: 2em;
+}
+
+.calc-step-number {
+    font-weight: bold;
+    margin-left: -2em;
+    float: left;
+}
+
+/* References and footnotes */
+.references {
+    font-size: 9pt;
+    margin-top: 2em;
+    padding-top: 1em;
+    border-top: 1px solid #cccccc;
+}
+
+.footnote {
+    font-size: 8pt;
+    vertical-align: super;
+}
+
+/* Appendix styling */
+.appendix {
+    page-break-before: always;
+}
+
+.appendix h2 {
+    background-color: #e6e6e6;
+    padding: 0.5em;
+    margin-bottom: 1em;
+}
+
+/* Status indicators */
+.status-pass {
+    color: #008000;
+    font-weight: bold;
+}
+
+.status-fail {
+    color: #ff0000;
+    font-weight: bold;
+}
+
+.status-warning {
+    color: #ff8c00;
+    font-weight: bold;
+}
+
+/* Chemical formulas */
+.chemical {
+    font-family: 'Times New Roman', serif;
+}
+
+sub {
+    font-size: 0.75em;
+    vertical-align: sub;
+}
+
+sup {
+    font-size: 0.75em;
+    vertical-align: super;
+}
+
+/* Units */
+.unit {
+    font-style: italic;
+    margin-left: 0.2em;
+}
+
+/* Graphs and figures */
+.figure {
+    margin: 1.5em 0;
+    text-align: center;
+    page-break-inside: avoid;
+}
+
+.figure img {
+    max-width: 100%;
+    height: auto;
+}
+
+.figure-caption {
+    font-size: 9pt;
+    margin-top: 0.5em;
+    font-style: italic;
+}
+
+/* Error and warning boxes */
+.error-box {
+    border: 2px solid #ff0000;
+    background-color: #ffe6e6;
+    padding: 1em;
+    margin: 1em 0;
+}
+
+.warning-box {
+    border: 2px solid #ff8c00;
+    background-color: #fff3e0;
+    padding: 1em;
+    margin: 1em 0;
+}
+
+/* Professional appearance adjustments */
+.header-table {
+    width: 100%;
+    border: none;
+    margin-bottom: 2em;
+}
+
+.header-table td {
+    border: none;
+    padding: 2px 0;
+}
+
+.header-table td:first-child {
+    font-weight: bold;
+    width: 150px;
+}
